@@ -1,0 +1,32 @@
+# Python & project ignores
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.coverage
+
+# Virtual env
+venv/
+
+# Logs
+logs/
+*.log
+
+# Envs & secrets
+.env
+*.env.local
+.env.production
+.env.development
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# DB/files
+*.sqlite
+*.db
+
+# Workspace files
+my-fastapi-backend.code-workspace
