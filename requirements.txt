@@ -1,0 +1,43 @@
+#pip install -r requirements.txt -команда установки зависимостей
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+python-dotenv==1.0.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+feedparser==6.0.10
+
+# Дополнительные зависимости для разработки и производства
+alembic==1.12.1
+pydantic==2.5.0
+pydantic-settings==2.1.0
+email-validator==2.1.0
+python-multipart==0.0.6
+
+# Утилиты и инструменты
+requests==2.31.0
+aiofiles==23.2.1
+httpx==0.25.2
+resend==0.8.0
+
+# Тестирование
+pytest==7.4.3
+pytest-asyncio==0.21.1
+# httpx is already listed above under utilities
+
+# Документация и мониторинг
+python-dateutil==2.8.2
+loguru==0.7.2
+psutil==5.9.6
+
+# Безопасность
+cryptography==41.0.7
+bcrypt==4.1.1
+
+# Валидация данных
+typing-extensions==4.8.0
+
+# Асинхронность
+anyio==3.7.1
+redis==5.0.4

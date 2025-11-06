@@ -1,0 +1,103 @@
+~$ sudo -u postgres psql -d myfastapi
+psql (16.10 (Ubuntu 16.10-0ubuntu0.24.04.1))
+Type "help" for help.
+
+myfastapi=# \dt
+               List of relations
+ Schema |     Name      | Type  |    Owner     
+--------+---------------+-------+--------------
+ public | auth          | table | fastapi_user
+ public | messages      | table | fastapi_user
+ public | notifications | table | fastapi_user
+ public | users         | table | fastapi_user
+(4 rows)
+
+myfastapi=# \d auth
+                                          Table "public.auth"
+    Column     |            Type             | Collation | Nullable |             Default              
+---------------+-----------------------------+-----------+----------+----------------------------------
+ id            | integer                     |           | not null | nextval('auth_id_seq'::regclass)
+ user_id       | integer                     |           | not null | 
+ password_hash | character varying(255)      |           | not null | 
+ role          | character varying(20)       |           |          | 'user'::character varying
+ created_at    | timestamp without time zone |           |          | CURRENT_TIMESTAMP
+ last_login    | timestamp without time zone |           |          | 
+ is_online     | boolean                     |           |          | false
+Indexes:
+    "auth_pkey" PRIMARY KEY, btree (id)
+    "auth_user_id_key" UNIQUE CONSTRAINT, btree (user_id)
+Foreign-key constraints:
+    "auth_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+
+myfastapi=# \d users
+                                 Table "public.users"
+ Column |       Type        | Collation | Nullable |              Default              
+--------+-------------------+-----------+----------+-----------------------------------
+ id     | integer           |           | not null | nextval('users_id_seq'::regclass)
+ name   | character varying |           |          | 
+ age    | integer           |           |          | 
+ email  | character varying |           |          | 
+ gender | character varying |           | not null | 'не указан'::character varying
+Indexes:
+    "users_pkey" PRIMARY KEY, btree (id)
+    "ix_users_email" UNIQUE, btree (email)
+    "ix_users_id" btree (id)
+    "ix_users_name" btree (name)
+Referenced by:
+    TABLE "auth" CONSTRAINT "auth_user_id_fkey" FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    TABLE "messages" CONSTRAINT "messages_receiver_id_fkey" FOREIGN KEY (receiver_id) REFERENCES users(id)
+    TABLE "messages" CONSTRAINT "messages_sender_id_fkey" FOREIGN KEY (sender_id) REFERENCES users(id)
+    TABLE "notifications" CONSTRAINT "notifications_receiver_id_fkey" FOREIGN KEY (receiver_id) REFERENCES users(id)
+    TABLE "notifications" CONSTRAINT "notifications_sender_id_fkey" FOREIGN KEY (sender_id) REFERENCES users(id)
+
+myfastapi=# \d notifications
+                                         Table "public.notifications"
+    Column    |            Type             | Collation | Nullable |                  Default                  
+--------------+-----------------------------+-----------+----------+-------------------------------------------
+ id           | integer                     |           | not null | nextval('notifications_id_seq'::regclass)
+ sender_id    | integer                     |           | not null | 
+ receiver_id  | integer                     |           | not null | 
+ message_text | character varying(100)      |           | not null | 
+ created_at   | timestamp without time zone |           |          | 
+ is_read      | boolean                     |           |          | 
+Indexes:
+    "notifications_pkey" PRIMARY KEY, btree (id)
+    "ix_notifications_id" btree (id)
+Foreign-key constraints:
+    "notifications_receiver_id_fkey" FOREIGN KEY (receiver_id) REFERENCES users(id)
+    "notifications_sender_id_fkey" FOREIGN KEY (sender_id) REFERENCES users(id)
+
+myfastapi=# 
+
+ Table "public.cnews_rss_items"
+    Column    |           Type           | Collation | Nullable |                   Default                   
+--------------+--------------------------+-----------+----------+---------------------------------------------
+ id           | integer                  |           | not null | nextval('cnews_rss_items_id_seq'::regclass)
+ title        | text                     |           | not null | 
+ link         | text                     |           | not null | 
+ summary      | text                     |           |          | 
+ published_at | timestamp with time zone |           |          | 
+ fetched_at   | timestamp with time zone |           |          | now()
+ is_deleted   | boolean                  |           | not null | 
+Indexes:
+    "cnews_rss_items_pkey" PRIMARY KEY, btree (id)
+    "ix_cnews_rss_items_id" btree (id)
+    "uq_cnews_link" UNIQUE CONSTRAINT, btree (link)
+
+Table "public.habr_rss_items"
+    Column    |           Type           | Collation | Nullable |                  Default                   
+--------------+--------------------------+-----------+----------+--------------------------------------------
+ id           | integer                  |           | not null | nextval('habr_rss_items_id_seq'::regclass)
+ title        | text                     |           | not null | 
+ link         | text                     |           | not null | 
+ summary      | text                     |           |          | 
+ published_at | timestamp with time zone |           |          | 
+ fetched_at   | timestamp with time zone |           |          | now()
+ is_deleted   | boolean                  |           | not null | 
+Indexes:
+    "habr_rss_items_pkey" PRIMARY KEY, btree (id)
+    "ix_habr_rss_items_id" btree (id)
+    "uq_habr_link" UNIQUE CONSTRAINT, btree (link)
+
+
+
