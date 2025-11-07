@@ -40,6 +40,7 @@ except Exception:
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, ORJSONResponse
+import logging
 import secrets as _secrets
 
 # Disable default docs; we’ll mount protected docs below. Use ORJSONResponse for speed.
@@ -89,6 +90,17 @@ app.add_middleware(SecurityHeadersMiddleware)
 from starlette.middleware.gzip import GZipMiddleware
 # GZip large responses (e.g., RSS lists)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+# Suppress noisy access logs for health checks only
+class _HealthzAccessFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        return "/healthz" not in msg
+
+logging.getLogger("uvicorn.access").addFilter(_HealthzAccessFilter())
 
 # --- Basic Auth for "/" and docs (enabled if BASIC_AUTH_USER/PASSWORD set) ---
 security = HTTPBasic()
