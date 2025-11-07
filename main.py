@@ -37,8 +37,13 @@ try:
     from redis.asyncio import from_url as redis_from_url
 except Exception:
     redis_from_url = None
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import JSONResponse
+import secrets as _secrets
 
-app = FastAPI(title="Studio NN Registration API")
+# Disable default docs; we’ll mount protected docs below
+app = FastAPI(title="Studio NN Registration API", docs_url=None, redoc_url=None, openapi_url=None)
 
 # CORS: allow local dev and deployed frontend; extra origins via env ALLOW_ORIGINS (comma-separated)
 _DEFAULT_ORIGINS = [
@@ -75,6 +80,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+# --- Basic Auth for "/" and docs (enabled if BASIC_AUTH_USER/PASSWORD set) ---
+security = HTTPBasic()
+BASIC_USER = os.getenv("BASIC_AUTH_USER", "")
+BASIC_PASS = os.getenv("BASIC_AUTH_PASSWORD", "")
+
+def require_basic(credentials: HTTPBasicCredentials = Depends(security)):
+    if not BASIC_USER or not BASIC_PASS:
+        return
+    ok_u = _secrets.compare_digest(credentials.username, BASIC_USER)
+    ok_p = _secrets.compare_digest(credentials.password, BASIC_PASS)
+    if not (ok_u and ok_p):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized",
+            headers={"WWW-Authenticate": "Basic"},
+        )
 
 @app.on_event("startup")
 def ensure_db_columns():
@@ -245,8 +267,17 @@ async def verify_email(
 
 
 @app.get("/")
-def home():
+def home(_: None = Depends(require_basic)):
     return {"status": "Studio NN Email Verification API работает"}
+
+# Protected OpenAPI JSON and Swagger UI
+@app.get("/openapi.json", include_in_schema=False)
+def openapi_json(_: None = Depends(require_basic)):
+    return JSONResponse(app.openapi())
+
+@app.get("/docs", include_in_schema=False)
+def docs(_: None = Depends(require_basic)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="API docs")
 
 
 @app.get("/me")
@@ -269,6 +300,7 @@ def me(request: Request, db: Session = Depends(get_db)):
 @app.post("/refresh-token")
 def refresh_token(request: Request, response: Response, db: Session = Depends(get_db)):
     """Rotate refresh token and issue new access token via HttpOnly cookies."""
+    _require_csrf(request)
     refresh = request.cookies.get("refresh_token")
     if not refresh:
         raise HTTPException(status_code=401, detail="No refresh token")
@@ -343,6 +375,30 @@ def set_session_cookies(response: Response, access_token: str, refresh_token: st
             secure=secure,
             path="/",
         )
+
+    # Issue CSRF token cookie (non-HttpOnly) so clients can echo via X-CSRF-Token
+    try:
+        csrf = _secrets.token_urlsafe(32)
+        response.set_cookie(
+            key="csrf_token",
+            value=csrf,
+            httponly=False,
+            samesite=samesite,
+            secure=secure,
+            path="/",
+        )
+    except Exception:
+        pass
+
+
+def _require_csrf(request: Request):
+    """Validate CSRF for cookie-based POSTs when COOKIE_SECURE=true (prod)."""
+    if os.getenv("COOKIE_SECURE", "false").lower() != "true":
+        return
+    header = request.headers.get("x-csrf-token") or request.headers.get("X-CSRF-Token")
+    cookie = request.cookies.get("csrf_token")
+    if not header or not cookie or not _secrets.compare_digest(header, cookie):
+        raise HTTPException(status_code=403, detail="CSRF token invalid or missing")
 
 
 def clear_session_cookies(response: Response):
@@ -421,6 +477,7 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
 
     Accept either Authorization: Bearer or HttpOnly cookie.
     """
+    _require_csrf(request)
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     token = None
     if auth_header and auth_header.lower().startswith("bearer "):
@@ -453,6 +510,7 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
 
 @app.post("/presence/offline")
 def presence_offline(request: Request, db: Session = Depends(get_db)):
+    _require_csrf(request)
     token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="No session")

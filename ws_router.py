@@ -244,7 +244,6 @@ async def ws_endpoint(ws: WebSocket):
                                     "name": u.name,
                                     "age": u.age,
                                     "gender": u.gender,
-                                    "email": u.email,
                                     "created_at": u.created_at.isoformat() if u.created_at else None,
                                     "is_verified": u.is_verified,
                                     "role": a.role if a else None,

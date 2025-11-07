@@ -1,5 +1,5 @@
 # rss_router.py
-from fastapi import APIRouter, Depends, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 import feedparser
 from dateutil import parser as dtparse
@@ -8,6 +8,7 @@ from database import get_db
 import rss_crud as crud
 import rss_schemas as schemas
 import rss_models as models
+import os
 
 router = APIRouter(prefix="/rss", tags=["rss"])
 
@@ -85,8 +86,20 @@ def _ensure_fresh(db: Session, sources: list[str], min_age_hours: int = 24):
             # fail open; serve cached data
             pass
 
+
+def require_admin_api_key(request: Request):
+    """Allow access to fetch endpoints only when X-API-Key matches ADMIN_API_KEY.
+    If ADMIN_API_KEY is not set, allow in dev by default.
+    """
+    admin_key = os.getenv("ADMIN_API_KEY", "").strip()
+    if not admin_key:
+        return
+    key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+    if key != admin_key:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
 @router.post("/fetch/{source}", summary="Скачать 5 новостей из указанного источника")
-def rss_fetch(source: str, db: Session = Depends(get_db)):
+def rss_fetch(source: str, db: Session = Depends(get_db), _: None = Depends(require_admin_api_key)):
     if source not in RSS_SOURCES:
         return {"status": "error", "message": f"Unknown source. Available: {list(RSS_SOURCES.keys())}"}
     
@@ -94,7 +107,7 @@ def rss_fetch(source: str, db: Session = Depends(get_db)):
     return {"status": "ok", "message": f"Загружено до 5 новостей из {RSS_SOURCES[source]['name']}"}
 
 @router.post("/fetch-bg/{source}", summary="Запланировать скачивание 5 новостей в фоне")
-def rss_fetch_bg(source: str, background: BackgroundTasks, db: Session = Depends(get_db)):
+def rss_fetch_bg(source: str, background: BackgroundTasks, db: Session = Depends(get_db), _: None = Depends(require_admin_api_key)):
     if source not in RSS_SOURCES:
         return {"status": "error", "message": f"Unknown source. Available: {list(RSS_SOURCES.keys())}"}
     
