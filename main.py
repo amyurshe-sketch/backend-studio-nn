@@ -282,6 +282,11 @@ async def verify_email(
 def home(_: None = Depends(require_basic)):
     return {"status": "Studio NN Email Verification API работает"}
 
+# Public health endpoint (no auth) for Render health checks and wake-ups
+@app.get("/healthz", include_in_schema=False)
+def healthz():
+    return {"ok": True}
+
 # Protected OpenAPI JSON and Swagger UI
 @app.get("/openapi.json", include_in_schema=False)
 def openapi_json(_: None = Depends(require_basic)):
