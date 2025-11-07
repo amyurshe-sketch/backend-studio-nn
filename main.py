@@ -221,7 +221,19 @@ async def verify_email(
     data: EmailVerification,
     db: Session = Depends(get_db),
     response: Response = None,
+    request: Request = None,
 ):
+    # Rate-limit verification attempts per IP and per email
+    try:
+        ip = (request.client.host if request and request.client else "?")
+    except Exception:
+        ip = "?"
+    email_key = f"verify:email:{(data.email or '').lower()}"
+    ip_key = f"verify:ip:{ip}"
+    await _enforce_limits([
+        (ip_key, 12, 10 * 60),   # 12 per 10 minutes per IP
+        (email_key, 8, 10 * 60), # 8 per 10 minutes per email
+    ], reason="verify")
     result = await crud.complete_registration(db, data.email, data.code)
     if isinstance(result, dict) and "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])

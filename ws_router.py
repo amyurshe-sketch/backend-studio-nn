@@ -10,6 +10,8 @@ import psycopg2
 import select as _select
 from database import SessionLocal
 import models, crud
+import time
+from collections import deque
 
 router = APIRouter()
 
@@ -23,6 +25,23 @@ class Conn:
         self.last_seen = datetime.utcnow()
 
 conns: dict[int, Conn] = {}
+
+# Simple per-user rate limiter for WS RPCs
+_WS_RL: dict[int, deque] = {}
+
+def _ws_allow(uid: int, limit: int, window_sec: int) -> bool:
+    now = time.time()
+    dq = _WS_RL.get(uid)
+    if dq is None:
+        dq = deque()
+        _WS_RL[uid] = dq
+    cutoff = now - window_sec
+    while dq and dq[0] < cutoff:
+        dq.popleft()
+    if len(dq) >= limit:
+        return False
+    dq.append(now)
+    return True
 
 
 async def auth_ws(ws: WebSocket) -> int:
@@ -180,6 +199,10 @@ async def ws_endpoint(ws: WebSocket):
                         await mark_online(user_id, False)
                 elif kind == "rpc":
                     if mtype == "notifications.send":
+                        # Rate-limit sending notifications per user (e.g., 20 per 60s)
+                        if not _ws_allow(user_id, int(os.getenv("WS_SEND_LIMIT", "20")), int(os.getenv("WS_SEND_WINDOW", "60"))):
+                            await ws.send_text(json.dumps({"type": "rpc_error", "id": mid, "error": {"message": "Rate limit exceeded", "code": 429}}))
+                            continue
                         payload_in = m.get("payload", {}) or {}
                         receiver_id = int(payload_in.get("receiver_id"))
                         message_text = str(payload_in.get("message_text", ""))[:100]

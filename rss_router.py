@@ -9,8 +9,27 @@ import rss_crud as crud
 import rss_schemas as schemas
 import rss_models as models
 import os
+import time
+from collections import deque
 
 router = APIRouter(prefix="/rss", tags=["rss"])
+
+# Simple per-process IP rate limit for RSS endpoints
+_RL: dict[str, deque] = {}
+
+def _allow(key: str, limit: int, window_sec: int) -> bool:
+    now = time.time()
+    dq = _RL.get(key)
+    if dq is None:
+        dq = deque()
+        _RL[key] = dq
+    cutoff = now - window_sec
+    while dq and dq[0] < cutoff:
+        dq.popleft()
+    if len(dq) >= limit:
+        return False
+    dq.append(now)
+    return True
 
 # Конфигурация RSS-источников
 RSS_SOURCES = {
@@ -98,6 +117,19 @@ def require_admin_api_key(request: Request):
     if key != admin_key:
         raise HTTPException(status_code=403, detail="Forbidden")
 
+
+def rss_rate_limit(request: Request):
+    """Limit RSS GET requests per IP. Defaults: 60 req / 5 min."""
+    try:
+        ip = request.client.host if request and request.client else "?"
+    except Exception:
+        ip = "?"
+    limit = int(os.getenv("RSS_RATE_LIMIT_COUNT", "60"))
+    window = int(os.getenv("RSS_RATE_LIMIT_WINDOW", "300"))
+    key = f"rss:ip:{ip}"
+    if not _allow(key, limit, window):
+        raise HTTPException(status_code=429, detail="Too many RSS requests. Please slow down.")
+
 @router.post("/fetch/{source}", summary="Скачать 5 новостей из указанного источника")
 def rss_fetch(source: str, db: Session = Depends(get_db), _: None = Depends(require_admin_api_key)):
     if source not in RSS_SOURCES:
@@ -127,7 +159,8 @@ def get_rss_sources():
 def rss_latest_by_source(
     source: str,
     limit: int = Query(50, ge=1, le=200), 
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: None = Depends(rss_rate_limit),
 ):
     if source not in RSS_SOURCES:
         return {"status": "error", "message": f"Unknown source. Available: {list(RSS_SOURCES.keys())}"}
@@ -137,7 +170,7 @@ def rss_latest_by_source(
     return crud.list_rss_items(db, model_class, limit=limit)
 
 @router.get("/latest", response_model=list[schemas.RssItemRead], summary="Последние новости из всех источников")
-def rss_latest(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)):
+def rss_latest(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db), _: None = Depends(rss_rate_limit)):
     _ensure_fresh(db, list(RSS_SOURCES.keys()), min_age_hours=24)
     return crud.list_all_rss_items(db, limit=limit)
 
@@ -145,7 +178,8 @@ def rss_latest(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_d
 @router.get("/news/cnews", response_model=list[schemas.RssItemRead], summary="Новости CNews для фронтенда")
 def get_cnews_for_frontend(
     limit: int = Query(5, ge=1, le=25, description="Количество новостей CNews (1-25)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: None = Depends(rss_rate_limit),
 ):
     """Эндпоинт специально для новостей CNews на фронтенде"""
     _ensure_fresh(db, ["cnews"], min_age_hours=24)
@@ -154,7 +188,8 @@ def get_cnews_for_frontend(
 @router.get("/news/habr", response_model=list[schemas.RssItemRead], summary="Новости Habr для фронтенда")
 def get_habr_for_frontend(
     limit: int = Query(5, ge=1, le=25, description="Количество новостей Habr (1-25)"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: None = Depends(rss_rate_limit),
 ):
     """Эндпоинт специально для новостей Habr на фронтенде"""
     _ensure_fresh(db, ["habr"], min_age_hours=24)
@@ -163,7 +198,8 @@ def get_habr_for_frontend(
 @router.get("/news", response_model=list[schemas.RssItemRead], summary="Получить последние новости для фронтенда")
 def get_news_for_frontend(
     limit: str = Query("10", description="Количество новостей (1-50) или 'all' для всех"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _: None = Depends(rss_rate_limit),
 ):
     """
     Эндпоинт специально для фронтенда LeisurePage.
