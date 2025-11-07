@@ -141,6 +141,18 @@ async def send_verification_email(user_email: str, code: str):
     msg.set_content(text_content)
     msg.add_alternative(html_content, subtype="html")
 
+    # Connection strategy:
+    # - If implicit TLS (port 465 or SMTP_USE_TLS=true), use TLS.
+    # - Otherwise prefer STARTTLS on submission ports (e.g., 587).
+    start_tls = False
+    use_tls_flag = bool(use_tls)
+    if smtp_port == 465:
+        use_tls_flag = True
+        start_tls = False
+    elif smtp_port in (587, 25):
+        # Many providers require STARTTLS on 587
+        use_tls_flag = False if use_tls_flag is False else False
+        start_tls = True
     try:
         await aiosmtplib.send(
             msg,
@@ -148,7 +160,10 @@ async def send_verification_email(user_email: str, code: str):
             port=smtp_port,
             username=smtp_user,
             password=smtp_pass,
-            use_tls=use_tls,
+            use_tls=use_tls_flag,
+            start_tls=start_tls,
+            timeout=20.0,
+            validate_certs=True,
         )
         logger.info(f"✅ Verification email sent to {user_email}")
     except Exception as e:
