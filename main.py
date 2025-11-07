@@ -39,11 +39,17 @@ except Exception:
     redis_from_url = None
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, ORJSONResponse
 import secrets as _secrets
 
-# Disable default docs; we’ll mount protected docs below
-app = FastAPI(title="Studio NN Registration API", docs_url=None, redoc_url=None, openapi_url=None)
+# Disable default docs; we’ll mount protected docs below. Use ORJSONResponse for speed.
+app = FastAPI(
+    title="Studio NN Registration API",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+    default_response_class=ORJSONResponse,
+)
 
 # CORS: allow local dev and deployed frontend; extra origins via env ALLOW_ORIGINS (comma-separated)
 _DEFAULT_ORIGINS = [
@@ -80,6 +86,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(SecurityHeadersMiddleware)
+from starlette.middleware.gzip import GZipMiddleware
+# GZip large responses (e.g., RSS lists)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # --- Basic Auth for "/" and docs (enabled if BASIC_AUTH_USER/PASSWORD set) ---
 security = HTTPBasic()

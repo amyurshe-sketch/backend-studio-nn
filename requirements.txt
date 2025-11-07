@@ -42,3 +42,4 @@ typing-extensions==4.8.0
 # Асинхронность
 anyio==3.7.1
 redis==5.0.4
+orjson==3.10.7
