@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     SMTP_FROM_NAME: str = "Studio NN"
     SMTP_USE_TLS: bool = True
 
+    # Optional HTTP email provider (fallback), e.g., Resend
+    RESEND_API_KEY: str | None = None
+
     class Config:
         env_file = ".env"
 

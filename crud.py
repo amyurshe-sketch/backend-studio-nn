@@ -14,6 +14,12 @@ import aiosmtplib
 import secrets
 import hashlib
 from logger import logger
+import os
+
+try:
+    import resend  # optional HTTP email provider
+except Exception:
+    resend = None
 
 # Импортируем настройки из config
 from config import settings
@@ -153,22 +159,50 @@ async def send_verification_email(user_email: str, code: str):
         # Many providers require STARTTLS on 587
         use_tls_flag = False if use_tls_flag is False else False
         start_tls = True
-    try:
-        await aiosmtplib.send(
-            msg,
-            hostname=smtp_host,
-            port=smtp_port,
-            username=smtp_user,
-            password=smtp_pass,
-            use_tls=use_tls_flag,
-            start_tls=start_tls,
-            timeout=20.0,
-            validate_certs=True,
-        )
-        logger.info(f"✅ Verification email sent to {user_email}")
-    except Exception as e:
-        logger.error(f"❌ Failed to send email to {user_email}: {e}")
-        raise
+    # Try SMTP with small retries
+    last_exc = None
+    for attempt in range(2):
+        try:
+            await aiosmtplib.send(
+                msg,
+                hostname=smtp_host,
+                port=smtp_port,
+                username=smtp_user,
+                password=smtp_pass,
+                use_tls=use_tls_flag,
+                start_tls=start_tls,
+                timeout=20.0,
+                validate_certs=True,
+            )
+            logger.info(f"✅ Verification email sent to {user_email} via SMTP")
+            return
+        except Exception as e:
+            last_exc = e
+            if attempt == 0:
+                try:
+                    await asyncio.sleep(1.0)
+                except Exception:
+                    pass
+    # SMTP failed; try Resend fallback if configured
+    api_key = getattr(settings, 'RESEND_API_KEY', None) or os.getenv('RESEND_API_KEY')
+    if api_key and resend is not None:
+        try:
+            resend.api_key = api_key
+            payload = {
+                "from": f"{from_name} <{smtp_user}>",
+                "to": [user_email],
+                "subject": subject,
+                "html": html_content,
+            }
+            # Run sync client in thread
+            await asyncio.to_thread(resend.Emails.send, payload)
+            logger.info(f"✅ Verification email sent to {user_email} via Resend")
+            return
+        except Exception as e:
+            last_exc = e
+    # If we get here, all methods failed
+    logger.error(f"❌ Failed to send email to {user_email}: {last_exc}")
+    raise last_exc
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)

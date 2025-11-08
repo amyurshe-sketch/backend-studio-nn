@@ -34,7 +34,10 @@ psutil==5.9.6
 
 # Безопасность
 cryptography==41.0.7
-bcrypt==4.1.1
+# NOTE: Passlib 1.7.x ожидает наличие bcrypt.__about__.__version__.
+# Начиная с bcrypt 4.1 это поле удалили, из‑за чего возникает ошибка
+# "module 'bcrypt' has no attribute '__about__'". Фикс — зафиксировать <4.1.
+bcrypt<4.1
 
 # Валидация данных
 typing-extensions==4.8.0
