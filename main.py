@@ -220,6 +220,46 @@ async def _enforce_limits(pairs: list[tuple[str, int, int]], reason: str):
 def home():
     return {"status": "Studio NN API работает"}
 
+
+@app.get("/self-test")
+def self_test(request: Request, db: Session = Depends(get_db)):
+    """Lightweight end-to-end test: API, DB, Redis, auth cookie."""
+    api_ok = True
+    db_ok = False
+    redis_ok = None
+    auth_cookie = bool(request.cookies.get("access_token"))
+    try:
+        db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
+    try:
+        if _REDIS is not None:
+            async def _ping():
+                try:
+                    await _REDIS.ping()
+                    return True
+                except Exception:
+                    return False
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                # In ASGI context, reuse loop
+                redis_ok = loop.run_until_complete(_ping()) if hasattr(loop, 'run_until_complete') else None
+            else:
+                redis_ok = asyncio.run(_ping())
+    except Exception:
+        redis_ok = False
+    return {
+        "api_ok": api_ok,
+        "db_ok": db_ok,
+        "redis_ok": redis_ok,
+        "authenticated": auth_cookie,
+        "time": datetime.utcnow().isoformat() + "Z",
+    }
+
 # Public health endpoint (no auth) for Render health checks and wake-ups
 @app.get("/healthz", include_in_schema=False)
 def healthz():
