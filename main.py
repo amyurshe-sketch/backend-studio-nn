@@ -99,7 +99,7 @@ class _HealthzAccessFilter(logging.Filter):
 
 logging.getLogger("uvicorn.access").addFilter(_HealthzAccessFilter())
 
-# --- Basic Auth for "/" and docs (enabled if BASIC_AUTH_USER/PASSWORD set) ---
+# --- Basic Auth helper (currently not used on public routes) ---
 security = HTTPBasic()
 BASIC_USER = os.getenv("BASIC_AUTH_USER", "")
 BASIC_PASS = os.getenv("BASIC_AUTH_PASSWORD", "")
@@ -217,7 +217,7 @@ async def _enforce_limits(pairs: list[tuple[str, int, int]], reason: str):
 
 
 @app.get("/")
-def home(_: None = Depends(require_basic)):
+def home():
     return {"status": "Studio NN API работает"}
 
 # Public health endpoint (no auth) for Render health checks and wake-ups
@@ -227,11 +227,11 @@ def healthz():
 
 # Protected OpenAPI JSON and Swagger UI
 @app.get("/openapi.json", include_in_schema=False)
-def openapi_json(_: None = Depends(require_basic)):
+def openapi_json():
     return JSONResponse(app.openapi())
 
 @app.get("/docs", include_in_schema=False)
-def docs(_: None = Depends(require_basic)):
+def docs():
     return get_swagger_ui_html(openapi_url="/openapi.json", title="API docs")
 
 
