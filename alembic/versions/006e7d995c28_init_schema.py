@@ -30,8 +30,9 @@ def upgrade() -> None:
                existing_type=postgresql.TIMESTAMP(),
                nullable=False,
                existing_server_default=sa.text('now()'))
-    op.drop_index('idx_notifications_unread', table_name='notifications')
-    op.drop_index('idx_notifications_user_unread', table_name='notifications')
+    # Be tolerant if these indexes never existed
+    op.execute("DROP INDEX IF EXISTS idx_notifications_unread")
+    op.execute("DROP INDEX IF EXISTS idx_notifications_user_unread")
     op.drop_column('notifications', 'delivered_at')
     op.alter_column('users', 'email',
                existing_type=sa.VARCHAR(),
