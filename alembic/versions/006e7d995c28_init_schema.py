@@ -33,7 +33,8 @@ def upgrade() -> None:
     # Be tolerant if these indexes never existed
     op.execute("DROP INDEX IF EXISTS idx_notifications_unread")
     op.execute("DROP INDEX IF EXISTS idx_notifications_user_unread")
-    op.drop_column('notifications', 'delivered_at')
+    # Column might not exist on some DBs; make drop idempotent
+    op.execute("ALTER TABLE notifications DROP COLUMN IF EXISTS delivered_at")
     op.alter_column('users', 'email',
                existing_type=sa.VARCHAR(),
                nullable=False)
