@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -11,11 +11,13 @@ class User(Base):
     # Поля имени/возраста/пола оставляем для совместимости, делаем необязательными
     name = Column(String, unique=True, index=True, nullable=True)
     age = Column(Integer, nullable=True)
-    email = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=True)
     gender = Column(String, nullable=True)
-    # Новые поля для упрощённой регистрации по email
+    # Новые поля для упрощённой регистрации и Telegram
     is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=func.now())
+    telegram_id = Column(BigInteger, unique=True, index=True, nullable=True)
+    telegram_username = Column(String, nullable=True)
 
 class Auth(Base):
     __tablename__ = "auth"
@@ -29,20 +31,6 @@ class Auth(Base):
     is_online = Column(Boolean, default=False)
     
     user = relationship("User")
-
-class RegistrationToken(Base):
-    __tablename__ = "registration_tokens"
-
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)
-    code = Column(String(6), nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=func.now(), nullable=False)
-    # Optional fields to persist initial registration data until verification
-    name = Column(String, nullable=True)
-    age = Column(Integer, nullable=True)
-    gender = Column(String, nullable=True)
-    password_hash = Column(String, nullable=True)
 
 
 class RefreshToken(Base):

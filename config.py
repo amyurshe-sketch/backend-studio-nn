@@ -1,22 +1,14 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     DATABASE_URL: str
     SECRET_KEY: str
-
-    SMTP_HOST: str = "smtp.yandex.ru"
-    SMTP_PORT: int = 465
-    SMTP_USER: str
-    SMTP_PASS: str
-    SMTP_FROM_NAME: str = "Studio NN"
-    SMTP_USE_TLS: bool = True
-
-    # Optional HTTP email provider (fallback), e.g., Resend
-    RESEND_API_KEY: str | None = None
-
-    class Config:
-        env_file = ".env"
+    TELEGRAM_BOT_TOKEN: str | None = None
+    TELEGRAM_BOT_USERNAME: str | None = None
+    TELEGRAM_CHAT_ID: str | None = None
 
 
 settings = Settings()

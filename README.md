@@ -43,8 +43,8 @@ backend requirements file, or point a root `requirements.txt` to this one:
 
 - `DATABASE_URL` — SQLAlchemy URL for Postgres
 - `SECRET_KEY` — JWT secret
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM_NAME`, `SMTP_USE_TLS` — SMTP settings for email verification
 
 ## Notes
 - Tables auto-create for RSS on startup via `Base.metadata.create_all()`.
 - CORS for frontend is configured in `main.py`. For production, set exact origins and HTTPS cookies.
+- Email verification flow has been removed; login works via username/password.

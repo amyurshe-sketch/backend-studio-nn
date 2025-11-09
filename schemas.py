@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 from datetime import datetime
 import re
@@ -97,9 +97,7 @@ class UserInfo(BaseModel):
     last_login: Optional[datetime] = None
 
 # Схемы для аутентификации
-class UserLogin(BaseModel):
-    name: str
-    password: str
+# Username/password auth removed
 
 class Token(BaseModel):
     access_token: str
@@ -116,15 +114,17 @@ class TokenData(BaseModel):
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
 
-# Схемы для верификации email
-class VerificationRequest(BaseModel):
-    email: str
-    code: str = Field(..., min_length=6, max_length=6, description="6-значный код подтверждения")
+# Telegram Login payload
+class TelegramAuth(BaseModel):
+    id: int
+    first_name: str | None = None
+    last_name: str | None = None
+    username: str | None = None
+    photo_url: str | None = None
+    auth_date: int
+    hash: str
 
-class RegistrationInitResponse(BaseModel):
-    message: str
-    email: str
-    code_sent: bool
+# Email verification schemas were removed
 
 # Схемы для сообщений
 class MessageBase(BaseModel):
@@ -174,17 +174,4 @@ class Notification(NotificationBase):
 class NotificationWithSender(Notification):
     sender_name: str
 
-class EmailVerification(BaseModel):
-    email: EmailStr
-    code: str
-
-# Дополнительные схемы для регистрации с верификацией
-class RegistrationResponse(BaseModel):
-    message: str
-    email: str
-    code_sent: bool
-
-class VerificationResponse(BaseModel):
-    message: str
-    user_id: int
-    username: str
+    
