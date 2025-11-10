@@ -28,15 +28,44 @@ def _load_json(filename: str):
 
 
 def upgrade() -> None:
-    # Ensure unique constraints to prevent duplicates by text
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+
+    def ensure_table(name: str):
+        if name not in inspector.get_table_names():
+            if name == 'quotes':
+                op.create_table(
+                    'quotes',
+                    sa.Column('id', sa.Integer, primary_key=True),
+                    sa.Column('text', sa.Text, nullable=False),
+                    sa.Column('author', sa.String),
+                )
+            elif name == 'quotes_ru':
+                op.create_table(
+                    'quotes_ru',
+                    sa.Column('id', sa.Integer, primary_key=True),
+                    sa.Column('text', sa.Text, nullable=False),
+                    sa.Column('author', sa.String),
+                )
+
+    # Ensure tables exist (idempotent)
+    ensure_table('quotes')
+    # refresh inspector cache as schema changed
+    inspector = sa.inspect(conn)
+    ensure_table('quotes_ru')
+
+    # Ensure unique constraints exist (idempotent)
     try:
-        with op.batch_alter_table('quotes') as b:
-            b.create_unique_constraint('uq_quotes_text', ['text'])
+        uqs = {c.get('name') for c in inspector.get_unique_constraints('quotes')}
+        if 'uq_quotes_text' not in uqs:
+            op.create_unique_constraint('uq_quotes_text', 'quotes', ['text'])
     except Exception:
         pass
+    inspector = sa.inspect(conn)
     try:
-        with op.batch_alter_table('quotes_ru') as b:
-            b.create_unique_constraint('uq_quotes_ru_text', ['text'])
+        uqs_ru = {c.get('name') for c in inspector.get_unique_constraints('quotes_ru')}
+        if 'uq_quotes_ru_text' not in uqs_ru:
+            op.create_unique_constraint('uq_quotes_ru_text', 'quotes_ru', ['text'])
     except Exception:
         pass
 
@@ -52,8 +81,6 @@ def upgrade() -> None:
         sa.Column('author', sa.String),
     )
 
-    conn = op.get_bind()
-
     # Load seeds
     try:
         en_items = _load_json('quotes_en.json')
@@ -66,20 +93,14 @@ def upgrade() -> None:
 
     # Insert EN quotes idempotently
     if en_items:
-        try:
-            existing = {row[0] for row in conn.execute(sa.text('SELECT text FROM quotes'))}
-        except Exception:
-            existing = set()
+        existing = {row[0] for row in conn.execute(sa.text('SELECT text FROM quotes'))}
         rows = [dict(text=i['text'], author=i.get('author')) for i in en_items if i.get('text') and i['text'] not in existing]
         if rows:
             op.bulk_insert(quotes, rows)
 
     # Insert RU quotes idempotently
     if ru_items:
-        try:
-            existing_ru = {row[0] for row in conn.execute(sa.text('SELECT text FROM quotes_ru'))}
-        except Exception:
-            existing_ru = set()
+        existing_ru = {row[0] for row in conn.execute(sa.text('SELECT text FROM quotes_ru'))}
         rows_ru = [dict(text=i['text'], author=i.get('author')) for i in ru_items if i.get('text') and i['text'] not in existing_ru]
         if rows_ru:
             op.bulk_insert(quotes_ru, rows_ru)
@@ -88,4 +109,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Usually we don't delete seeded data on downgrade.
     pass
-
