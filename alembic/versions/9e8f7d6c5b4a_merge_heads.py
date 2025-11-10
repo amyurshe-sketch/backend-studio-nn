@@ -1,7 +1,7 @@
-"""merge heads
+"""merge heads (stub to satisfy missing revision on prod)
 
 Revision ID: 9e8f7d6c5b4a
-Revises: 05f5764b7cd4, 1b2c3d4e5f67
+Revises: 05f5764b7cd4
 Create Date: 2025-11-09 00:15:00.000000
 
 """
@@ -13,17 +13,17 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '9e8f7d6c5b4a'
-down_revision: Union[str, Sequence[str], None] = ('05f5764b7cd4', '1b2c3d4e5f67')
+down_revision: Union[str, None] = '05f5764b7cd4'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # This is a merge point; no schema changes.
+    # No-op merge stub to bridge missing revision in prod.
     pass
 
 
 def downgrade() -> None:
-    # Merge points are typically not downgraded.
+    # No-op.
     pass
 
