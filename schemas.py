@@ -1,57 +1,24 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Optional
 from datetime import datetime
 import re
 
 class UserBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=50, description="Имя пользователя")
-    age: int = Field(..., ge=1, le=120, description="Возраст от 1 до 120 лет")
-    email: str = Field(..., description="Email адрес")
-    gender: str = Field(..., description="Пол обязателен для выбора")
-
-    @field_validator('email')
-    @classmethod
-    def validate_email(cls, v):
-        if not v:
-            raise ValueError('Email обязателен')
-        
-        # Проверка формата email с поддержкой плюс-адресов
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not re.match(email_pattern, v):
-            raise ValueError('Некорректный формат email')
-        
-        # Проверка домена
-        domain = v.split('@')[-1]
-        if domain in ['example.com', 'test.com', 'localhost']:
-            raise ValueError('Использование тестовых доменов запрещено')
-            
-        return v.lower()  # Приводим к нижнему регистру
 
     @field_validator('name')
     @classmethod
     def validate_name(cls, v):
         if not v.strip():
             raise ValueError('Имя не может быть пустым')
-        
-        # Проверка на допустимые символы
         if not re.match(r'^[a-zA-Zа-яА-Я0-9_\- ]+$', v):
             raise ValueError('Имя может содержать только буквы, цифры, пробелы, дефисы и подчеркивания')
-        
         if len(v) < 2:
             raise ValueError('Имя должно содержать минимум 2 символа')
-            
         return v.strip()
 
-    @field_validator('gender')
-    @classmethod
-    def validate_gender(cls, v):
-        allowed_genders = ['мужской', 'женский']
-        if v not in allowed_genders:
-            raise ValueError(f'Пол должен быть одним из: {", ".join(allowed_genders)}')
-        return v
-
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=3, max_length=100, description="Пароль от 3 до 100 символов")
+    password: str = Field(..., min_length=5, max_length=100, description="Пароль от 5 до 100 символов")
 
     @field_validator('password')
     @classmethod
@@ -60,10 +27,32 @@ class UserCreate(UserBase):
             raise ValueError('Пароль не может быть пустым')
         
         # Простые проверки пароля
-        if len(v) < 3:
-            raise ValueError('Пароль должен содержать минимум 3 символа')
-            
+        if len(v) < 5:
+            raise ValueError('Пароль должен содержать минимум 5 символов')
+        
+        # Запрещённые самые распространённые и слабые пароли (50)
+        banned_passwords = {
+            '123456','password','123456789','12345','12345678','qwerty','abc123','football','1234567','111111',
+            '123123','welcome','monkey','login','princess','solo','letmein','master','sunshine','hello',
+            'freedom','whatever','qazwsx','trustno1','dragon','iloveyou','passw0rd','admin','root','000000',
+            '1q2w3e4r','1234','qwertyuiop','starwars','superman','michael','shadow','pokemon','zaq12wsx','password1',
+            'asdfgh','baseball','football1','jennifer','hunter','buster','soccer','killer','google','batman',
+        }
+        if v.strip().lower() in banned_passwords:
+            raise ValueError('Этот пароль слишком распространён и запрещён. Выберите более надёжный пароль.')
+        
         return v
+
+    @model_validator(mode='after')
+    def validate_password_not_contains_name(self):
+        try:
+            name = (self.name or '').strip().lower()
+            pwd = (self.password or '').strip().lower()
+            if name and name in pwd:
+                raise ValueError('Пароль не должен содержать имя пользователя')
+        except AttributeError:
+            pass
+        return self
 
 class User(UserBase):
     id: int
@@ -74,8 +63,6 @@ class User(UserBase):
 class UserResponse(BaseModel):
     id: int
     name: str
-    age: int
-    gender: str
     
     class Config:
         from_attributes = True
@@ -87,11 +74,7 @@ class PaginatedUsers(BaseModel):
 class UserInfo(BaseModel):
     id: int
     name: Optional[str] = None
-    age: Optional[int] = None
-    gender: Optional[str] = None
-    email: str
     created_at: Optional[datetime] = None
-    is_verified: bool
     role: Optional[str] = None
     is_online: bool = False
     last_login: Optional[datetime] = None
@@ -113,16 +96,6 @@ class TokenData(BaseModel):
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
-
-# Telegram Login payload
-class TelegramAuth(BaseModel):
-    id: int
-    first_name: str | None = None
-    last_name: str | None = None
-    username: str | None = None
-    photo_url: str | None = None
-    auth_date: int
-    hash: str
 
 # Email verification schemas were removed
 
@@ -173,5 +146,44 @@ class Notification(NotificationBase):
 
 class NotificationWithSender(Notification):
     sender_name: str
+
+# Login schema
+class LoginRequest(BaseModel):
+    name: str
+    password: str
+
+
+# User profile schemas
+class UserProfileUpdate(BaseModel):
+    gender: str | None = None
+    age: int | None = Field(default=None, ge=1, le=120)
+    about: str | None = Field(default=None, max_length=100)
+    avatar_url: str | None = None
+
+    @field_validator('gender')
+    @classmethod
+    def validate_gender(cls, v):
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            return None
+        # allow common russian values or free-form 1-20 chars
+        allowed = {'мужской', 'женский'}
+        if v.lower() in allowed:
+            return v
+        if len(v) < 1 or len(v) > 20:
+            raise ValueError('Некорректное значение пола')
+        return v
+
+class UserProfileOut(BaseModel):
+    user_id: int
+    gender: str | None = None
+    age: int | None = None
+    about: str | None = None
+    avatar_url: str | None = None
+    
+    class Config:
+        from_attributes = True
 
     

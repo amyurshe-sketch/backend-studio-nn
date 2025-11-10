@@ -8,7 +8,7 @@ from database import get_db, engine
 from schemas import (
     UserCreate,
     Token,
-    TelegramAuth,
+    LoginRequest,
 )
 import models
 import crud
@@ -21,6 +21,8 @@ from sse_router import router as sse_router
 from users_router import router as users_router
 from notifications_router import router as notifications_router
 from ws_router import router as ws_router
+from quotes_router import router as quotes_router
+from profiles_router import router as profiles_router
 from collections import deque
 import time
 import asyncio
@@ -35,8 +37,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, ORJSONResponse
 import logging
-import hmac, hashlib, time
-import requests
+import time
 import secrets as _secrets
 
 # Disable default docs; we’ll mount protected docs below. Use ORJSONResponse for speed.
@@ -120,51 +121,128 @@ def require_basic(credentials: HTTPBasicCredentials = Depends(security)):
 def ensure_db_columns():
     # Lightweight compatibility migration for existing DBs
     with engine.begin() as conn:
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE"))
+        # Ensure core columns exist
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now()"))
-        # Email verification flow removed; no need to maintain registration_tokens table
-        # Relax NOT NULL on legacy users columns (backward-compat)
+        # Drop legacy columns if they exist
+        for col in ("age", "email", "gender", "is_verified", "telegram_id", "telegram_username"):
+            try:
+                conn.execute(text(f"ALTER TABLE users DROP COLUMN IF EXISTS {col}"))
+            except Exception:
+                pass
+        # Ensure FKs have ON DELETE CASCADE
         try:
-            conn.execute(text("ALTER TABLE users ALTER COLUMN name DROP NOT NULL"))
+            conn.execute(text("ALTER TABLE auth DROP CONSTRAINT IF EXISTS auth_user_id_fkey"))
+            conn.execute(text("ALTER TABLE auth ADD CONSTRAINT auth_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"))
         except Exception:
             pass
         try:
-            conn.execute(text("ALTER TABLE users ALTER COLUMN age DROP NOT NULL"))
+            conn.execute(text("ALTER TABLE refresh_tokens DROP CONSTRAINT IF EXISTS refresh_tokens_user_id_fkey"))
+            conn.execute(text("ALTER TABLE refresh_tokens ADD CONSTRAINT refresh_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"))
         except Exception:
             pass
         try:
-            conn.execute(text("ALTER TABLE users ALTER COLUMN gender DROP NOT NULL"))
-        except Exception:
-            pass
-        # Make email optional (nullable) for Telegram-only login
-        try:
-            conn.execute(text("ALTER TABLE users ALTER COLUMN email DROP NOT NULL"))
-        except Exception:
-            pass
-        # Telegram columns (id/username)
-        try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id BIGINT"))
+            conn.execute(text("ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_sender_id_fkey"))
+            conn.execute(text("ALTER TABLE notifications ADD CONSTRAINT notifications_sender_id_fkey FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE"))
         except Exception:
             pass
         try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_username VARCHAR"))
+            conn.execute(text("ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_receiver_id_fkey"))
+            conn.execute(text("ALTER TABLE notifications ADD CONSTRAINT notifications_receiver_id_fkey FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE"))
         except Exception:
             pass
+        # Quotes table (id, text, author, created_at)
         try:
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS users_telegram_id_key ON users (telegram_id)"))
+            conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS quotes (
+                  id SERIAL PRIMARY KEY,
+                  text TEXT NOT NULL,
+                  author VARCHAR NULL,
+                  created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL
+                )
+                """
+            ))
+        except Exception:
+            pass
+        # User profiles table
+        try:
+            conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS user_profiles (
+                  id SERIAL PRIMARY KEY,
+                  user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                  gender VARCHAR NULL,
+                  age INTEGER NULL,
+                  about VARCHAR(100) NULL,
+                  avatar_url VARCHAR NULL,
+                  created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL,
+                  updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL
+                )
+                """
+            ))
+        except Exception:
+            pass
+        # Russian quotes table
+        try:
+            conn.execute(text(
+                """
+                CREATE TABLE IF NOT EXISTS quotes_ru (
+                  id SERIAL PRIMARY KEY,
+                  text TEXT NOT NULL,
+                  author VARCHAR NULL,
+                  created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now() NOT NULL
+                )
+                """
+            ))
+        except Exception:
+            pass
+        # Seed a few quotes if table is empty
+        try:
+            count = conn.execute(text("SELECT COUNT(*) FROM quotes")).scalar() or 0
+            if count == 0:
+                conn.execute(text("INSERT INTO quotes (text, author) VALUES (:t, :a)"), [
+                    {"t": "The best way to get started is to stop talking and start doing.", "a": "Walt Disney"},
+                    {"t": "Simplicity is the soul of efficiency.", "a": "Austin Freeman"},
+                    {"t": "Programs must be written for people to read, and only incidentally for machines to execute.", "a": "Harold Abelson"},
+                    {"t": "Talk is cheap. Show me the code.", "a": "Linus Torvalds"},
+                    {"t": "Premature optimization is the root of all evil.", "a": "Donald Knuth"},
+                ])
+        except Exception:
+            pass
+        # Seed RU quotes if table is empty or contains only generic/old entries (no authors)
+        try:
+            total_ru = conn.execute(text("SELECT COUNT(*) FROM quotes_ru")).scalar() or 0
+            authored_ru = conn.execute(text("SELECT COUNT(*) FROM quotes_ru WHERE author IS NOT NULL AND trim(author) <> ''")).scalar() or 0
+            if total_ru == 0 or authored_ru == 0:
+                # Replace with modern Russian quotes (переводы известных цитат)
+                try:
+                    conn.execute(text("TRUNCATE TABLE quotes_ru RESTART IDENTITY"))
+                except Exception:
+                    pass
+                conn.execute(text("INSERT INTO quotes_ru (text, author) VALUES (:t, :a)"), [
+                    {"t": "Лучший способ начать — перестать говорить и начать делать.", "a": "Уолт Дисней"},
+                    {"t": "Простота — душа эффективности.", "a": "Остин Фриман"},
+                    {"t": "Программы должны писаться для людей, а лишь попутно для машин, которые их исполняют.", "a": "Гарольд Абельсон"},
+                    {"t": "Говорить легко. Покажите мне код.", "a": "Линус Торвальдс"},
+                    {"t": "Преждевременная оптимизация — корень всех зол.", "a": "Дональд Кнут"},
+                    {"t": "Дизайн — это не только то, как выглядит и ощущается. Дизайн — это то, как это работает.", "a": "Стив Джобс"},
+                ])
         except Exception:
             pass
 
 
 # --- Simple in-memory rate limiter (per-process) ---
 _RL_STORE: Dict[str, Deque[float]] = {}
+# Simple in-process lock/failure stores (fallback when Redis is not used)
+_LOCKS: Dict[str, float] = {}
+_FAILS: Dict[str, Deque[float]] = {}
 _REDIS = None
-_BOT_UN_CACHE = None
+ 
 
 @app.on_event("startup")
 async def _init_redis():
     global _REDIS
-    url = os.getenv("REDIS_URL")
+    url = os.getenv("REDIS_URL") or getattr(settings, 'REDIS_URL', None)
     if url and redis_from_url is not None:
         try:
             _REDIS = redis_from_url(url, encoding="utf-8", decode_responses=True)
@@ -189,6 +267,129 @@ def _allow_rate(key: str, limit: int, window_sec: int) -> bool:
         return False
     dq.append(now)
     return True
+
+def _limit_sync(pairs: list[tuple[str, int, int]], reason: str):
+    """Synchronous in-process limiter (per-process). Uses in-memory deque."""
+    for key, limit, window in pairs:
+        if not _allow_rate(key, limit, window):
+            raise HTTPException(status_code=429, detail=f"Too many attempts: {reason}")
+
+def _client_ip(request: Request) -> str:
+    xfwd = request.headers.get('x-forwarded-for') or request.headers.get('X-Forwarded-For')
+    if xfwd:
+        # first IP in list
+        return xfwd.split(',')[0].strip()
+    return request.client.host if request and request.client else 'unknown'
+
+def _is_locked(key: str) -> float:
+    """Return seconds remaining if locked, or 0 if not locked."""
+    now = time.time()
+    until = _LOCKS.get(key, 0.0)
+    if until and until > now:
+        return max(0.0, until - now)
+    if until and until <= now:
+        _LOCKS.pop(key, None)
+    return 0.0
+
+def _set_lock(key: str, seconds: int):
+    _LOCKS[key] = time.time() + max(0, seconds)
+
+def _record_fail(key: str, window_sec: int, lock_after: int, lock_sec: int) -> int:
+    """Record a failure for key; if lock_after within window, set lock for lock_sec.
+    Returns current count in window.
+    """
+    now = time.time()
+    dq = _FAILS.get(key)
+    if dq is None:
+        dq = deque()
+        _FAILS[key] = dq
+    cutoff = now - window_sec
+    while dq and dq[0] < cutoff:
+        dq.popleft()
+    dq.append(now)
+    if len(dq) >= lock_after:
+        # map fail key to lock key for in-memory lock as well
+        if key.startswith("fail:login:ip:"):
+            _set_lock("lock:login:ip:" + key.split("fail:login:ip:", 1)[1], lock_sec)
+        elif key.startswith("fail:login:user:"):
+            _set_lock("lock:login:user:" + key.split("fail:login:user:", 1)[1], lock_sec)
+        else:
+            _set_lock("lock:" + key, lock_sec)
+    return len(dq)
+
+def _clear_fails(key: str):
+    _FAILS.pop(key, None)
+
+# --- Redis-backed helpers (if Redis is available) ---
+async def _r_incr_with_ttl(key: str, window_sec: int) -> int:
+    if _REDIS is None:
+        raise RuntimeError("Redis is not available")
+    val = await _REDIS.incr(key)
+    if val == 1:
+        await _REDIS.expire(key, window_sec)
+    return int(val)
+
+async def _r_limit(keys: list[tuple[str, int, int]], reason: str):
+    if _REDIS is None:
+        raise RuntimeError("Redis not available")
+    for key, limit, window in keys:
+        try:
+            val = await _r_incr_with_ttl(key, window)
+            if val > limit:
+                raise HTTPException(status_code=429, detail=f"Too many attempts: {reason}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Redis limiter error ({reason}): {e}")
+            # fall back to in-memory
+            if not _allow_rate(key, limit, window):
+                raise HTTPException(status_code=429, detail=f"Too many attempts: {reason}")
+
+async def _r_lock_remaining(key: str) -> int:
+    if _REDIS is None:
+        raise RuntimeError("Redis not available")
+    ttl = await _REDIS.ttl(key)
+    if ttl is None or ttl < 0:
+        return 0
+    return int(ttl)
+
+async def _r_set_lock(key: str, seconds: int):
+    if _REDIS is None:
+        raise RuntimeError("Redis not available")
+    try:
+        await _REDIS.set(key, "1", ex=max(1, seconds))
+    except Exception:
+        pass
+
+def _lock_key_for_fail(key: str) -> str:
+    # Map fail-keys to lock-keys used by checks
+    if key.startswith("fail:login:ip:"):
+        return "lock:login:ip:" + key.split("fail:login:ip:", 1)[1]
+    if key.startswith("fail:login:user:"):
+        return "lock:login:user:" + key.split("fail:login:user:", 1)[1]
+    return "lock:" + key
+
+async def _r_record_fail(key: str, window_sec: int, lock_after: int, lock_sec: int) -> int:
+    if _REDIS is None:
+        raise RuntimeError("Redis not available")
+    try:
+        val = await _r_incr_with_ttl(key, window_sec)
+        if val >= lock_after:
+            await _r_set_lock(_lock_key_for_fail(key), lock_sec)
+        return int(val)
+    except Exception as e:
+        logger.warning(f"Redis fail recorder error: {e}")
+        # fall back to in-memory
+        count = _record_fail(key, window_sec, lock_after, lock_sec)
+        return count
+
+async def _r_clear_fails(key: str):
+    if _REDIS is None:
+        raise RuntimeError("Redis not available")
+    try:
+        await _REDIS.delete(key)
+    except Exception:
+        pass
 
 async def _enforce_limits(pairs: list[tuple[str, int, int]], reason: str):
     for key, limit, window in pairs:
@@ -233,23 +434,10 @@ def self_test(request: Request, db: Session = Depends(get_db)):
         db_ok = True
     except Exception:
         db_ok = False
+    # In ASGI context, we avoid blocking the running loop; report connection presence
     try:
         if _REDIS is not None:
-            async def _ping():
-                try:
-                    await _REDIS.ping()
-                    return True
-                except Exception:
-                    return False
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = None
-            if loop and loop.is_running():
-                # In ASGI context, reuse loop
-                redis_ok = loop.run_until_complete(_ping()) if hasattr(loop, 'run_until_complete') else None
-            else:
-                redis_ok = asyncio.run(_ping())
+            redis_ok = True
     except Exception:
         redis_ok = False
     return {
@@ -323,19 +511,17 @@ app.include_router(sse_router)
 app.include_router(users_router)
 app.include_router(notifications_router)
 app.include_router(ws_router)
+app.include_router(quotes_router)
+app.include_router(profiles_router)
 
 
 @app.get("/statistics")
 def statistics(db: Session = Depends(get_db)):
     """System-wide user statistics."""
     total_users = db.query(models.User).count()
-    female_users = db.query(models.User).filter(models.User.gender == 'женский').count()
-    male_users = db.query(models.User).filter(models.User.gender == 'мужской').count()
     online_users = db.query(models.Auth).filter(models.Auth.is_online == True).count()
     return {
         "total_users": total_users,
-        "female_users": female_users,
-        "male_users": male_users,
         "online_users": online_users,
     }
 
@@ -400,135 +586,129 @@ def clear_session_cookies(response: Response):
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
 
+@app.post("/login", response_model=Token)
+async def login(payload: LoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
+    """Username/password login. Issues HttpOnly cookies and returns token info."""
+    name = (payload.name or "").strip()
+    password = payload.password or ""
+    ip = _client_ip(request)
+    # Check locks
+    # Locks and rates via Redis if available; fallback to memory
+    if _REDIS is not None:
+        rem_ip = await _r_lock_remaining(f"lock:login:ip:{ip}")
+        if rem_ip:
+            raise HTTPException(status_code=429, detail=f"Too many attempts. Try again in {int(rem_ip)}s")
+        rem_user = await _r_lock_remaining(f"lock:login:user:{name.lower()}")
+        if rem_user:
+            raise HTTPException(status_code=429, detail=f"Too many attempts. Try again in {int(rem_user)}s")
+        await _r_limit([
+            (f"rl:login:ip:{ip}", 20, 60),
+            (f"rl:login:user:{name.lower()}", 10, 300),
+        ], reason="login")
+    else:
+        rem = _is_locked(f"lock:login:ip:{ip}")
+        if rem:
+            raise HTTPException(status_code=429, detail=f"Too many attempts. Try again in {int(rem)}s")
+        rem = _is_locked(f"lock:login:user:{name.lower()}")
+        if rem:
+            raise HTTPException(status_code=429, detail=f"Too many attempts. Try again in {int(rem)}s")
+        _limit_sync([
+            (f"rl:login:ip:{ip}", 20, 60),
+            (f"rl:login:user:{name.lower()}", 10, 300),
+        ], reason="login")
+    if not name or not password:
+        raise HTTPException(status_code=400, detail="Name and password required")
 
-def _verify_telegram_auth(data: dict, bot_token: str) -> bool:
-    try:
-        received_hash = data.get('hash')
-        if not received_hash:
-            return False
-        pairs = []
-        for k in sorted([k for k in data.keys() if k != 'hash']):
-            v = data[k]
-            pairs.append(f"{k}={v}")
-        data_check_string = '\n'.join(pairs)
-        secret_key = hashlib.sha256(bot_token.encode('utf-8')).digest()
-        calc_hash = hmac.new(secret_key, data_check_string.encode('utf-8'), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(calc_hash, received_hash):
-            return False
-        # Optional: reject stale auth (older than 24h)
-        try:
-            auth_date = int(data.get('auth_date') or 0)
-            if auth_date and (time.time() - auth_date) > 86400:
-                return False
-        except Exception:
-            pass
-        return True
-    except Exception:
-        return False
+    user = crud.get_user_by_name(db, name)
+    if not user:
+        # record failures on unknown usernames by IP only
+        if _REDIS is not None:
+            await _r_record_fail(f"fail:login:ip:{ip}", window_sec=600, lock_after=20, lock_sec=900)
+        else:
+            _record_fail(f"fail:login:ip:{ip}", window_sec=600, lock_after=20, lock_sec=900)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    auth = crud.get_auth_by_user_id(db, user.id)
+    if not auth or not auth.password_hash:
+        if _REDIS is not None:
+            await _r_record_fail(f"fail:login:ip:{ip}", window_sec=600, lock_after=20, lock_sec=900)
+            await _r_record_fail(f"fail:login:user:{name.lower()}", window_sec=300, lock_after=5, lock_sec=900)
+        else:
+            _record_fail(f"fail:login:ip:{ip}", window_sec=600, lock_after=20, lock_sec=900)
+            _record_fail(f"fail:login:user:{name.lower()}", window_sec=300, lock_after=5, lock_sec=900)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not crud.verify_password(password, auth.password_hash):
+        # record failed attempt; lock user after 5 fails/5min; IP after 20/10min
+        if _REDIS is not None:
+            await _r_record_fail(f"fail:login:user:{name.lower()}", window_sec=300, lock_after=5, lock_sec=900)
+            await _r_record_fail(f"fail:login:ip:{ip}", window_sec=600, lock_after=20, lock_sec=900)
+        else:
+            _record_fail(f"fail:login:user:{name.lower()}", window_sec=300, lock_after=5, lock_sec=900)
+            _record_fail(f"fail:login:ip:{ip}", window_sec=600, lock_after=20, lock_sec=900)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    # Mark user online and set last_login
+    auth.is_online = True
+    auth.last_login = datetime.utcnow()
+    db.commit()
+    # clear failure counters on success
+    if _REDIS is not None:
+        await _r_clear_fails(f"fail:login:user:{name.lower()}")
+    else:
+        _clear_fails(f"fail:login:user:{name.lower()}")
 
-@app.post("/auth/telegram", response_model=Token)
-async def auth_telegram(payload: TelegramAuth, db: Session = Depends(get_db), response: Response = None):
-    bot_token = os.getenv('TELEGRAM_BOT_TOKEN') or getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
-    if not bot_token:
-        raise HTTPException(status_code=500, detail="Telegram auth is not configured")
-    data = payload.dict()
-    if not _verify_telegram_auth(data, bot_token):
-        raise HTTPException(status_code=401, detail="Invalid Telegram signature")
-
-    result = crud.upsert_user_from_telegram(db, data)
-    user = result["user"]
-    auth = result["auth"]
     access_token = crud.create_access_token({"user_id": user.id})
     refresh_token = crud.create_refresh_token(db, user.id)
-    if response is not None:
-        set_session_cookies(response, access_token, refresh_token)
+    set_session_cookies(response, access_token, refresh_token)
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user_id": user.id,
-        "name": user.name,
-        "role": auth.role if auth else "user",
+        "name": user.name or "",
+        "role": auth.role or "user",
         "refresh_token": refresh_token,
     }
 
 
-def _bot_username() -> str | None:
-    global _BOT_UN_CACHE
-    if _BOT_UN_CACHE:
-        return _BOT_UN_CACHE
-    un = getattr(settings, 'TELEGRAM_BOT_USERNAME', None) or os.getenv('TELEGRAM_BOT_USERNAME')
-    if un:
-        _BOT_UN_CACHE = un.lstrip('@')
-        return _BOT_UN_CACHE
-    token = os.getenv('TELEGRAM_BOT_TOKEN') or getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
-    if not token:
-        return None
+@app.post("/register", response_model=Token)
+async def register(payload: UserCreate, response: Response, request: Request, db: Session = Depends(get_db)):
+    """Register a new user with unique name and password; start a session via cookies."""
+    name = (payload.name or "").strip()
+    password = payload.password or ""
+    ip = _client_ip(request)
+    # Rate limit registrations per IP
+    if _REDIS is not None:
+        await _r_limit([
+            (f"rl:register:ip:{ip}", 3, 600),
+            (f"rl:register:ip-hour:{ip}", 10, 3600),
+        ], reason="register")
+    else:
+        _limit_sync([
+            (f"rl:register:ip:{ip}", 3, 600),
+            (f"rl:register:ip-hour:{ip}", 10, 3600),
+        ], reason="register")
+    if not name or not password:
+        raise HTTPException(status_code=400, detail="Name and password required")
     try:
-        r = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
-        j = r.json()
-        if j.get('ok') and j.get('result', {}).get('username'):
-            _BOT_UN_CACHE = j['result']['username']
-            return _BOT_UN_CACHE
+        user = crud.create_user(db, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception:
-        return None
-    return None
+        raise HTTPException(status_code=500, detail="Failed to create user")
 
-
-@app.post("/auth/telegram/send-login")
-def send_telegram_login(request: Request):
-    token = os.getenv('TELEGRAM_BOT_TOKEN') or getattr(settings, 'TELEGRAM_BOT_TOKEN', None)
-    chat_id = os.getenv('TELEGRAM_CHAT_ID') or getattr(settings, 'TELEGRAM_CHAT_ID', None)
-    if not token:
-        raise HTTPException(status_code=500, detail="Telegram bot token not configured (set TELEGRAM_BOT_TOKEN)")
-    if not chat_id:
-        raise HTTPException(status_code=500, detail="Telegram chat id not configured (set TELEGRAM_CHAT_ID)")
-    bot_un = _bot_username()
-    if not bot_un:
-        raise HTTPException(status_code=500, detail="Cannot resolve bot username")
-
-    origin = request.headers.get('origin') or 'http://localhost:3000'
-    return_to = origin.rstrip('/') + '/tg-callback'
-    oauth_url = (
-        f"https://oauth.telegram.org/auth?bot={bot_un}&origin={origin}"
-        f"&embed=1&request_access=write&return_to={return_to}"
-    )
-    ok = False
-    api_error = None
-    try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={
-                "chat_id": int(chat_id),
-                "text": "Нажмите кнопку, чтобы войти на сайт",
-                "reply_markup": {
-                    "inline_keyboard": [[{
-                        "text": "Войти через Telegram",
-                        "login_url": {
-                            "url": oauth_url,
-                            "request_write_access": True,
-                        }
-                    }]]
-                }
-            },
-            timeout=8,
-        )
-        ok = bool(resp.ok)
-        if not ok:
-            try:
-                api_error = resp.text
-            except Exception:
-                api_error = "telegram sendMessage failed"
-    except Exception as e:
-        ok = False
-        api_error = str(e)
+    auth = crud.get_auth_by_user_id(db, user.id)
+    access_token = crud.create_access_token({"user_id": user.id})
+    refresh_token = crud.create_refresh_token(db, user.id)
+    set_session_cookies(response, access_token, refresh_token)
     return {
-        "ok": ok,
-        "bot_username": bot_un,
-        "deep_link": f"https://t.me/{bot_un}",
-        "oauth_url": oauth_url,
-        "error": api_error,
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_id": user.id,
+        "name": user.name or "",
+        "role": auth.role if auth else "user",
+        "refresh_token": refresh_token,
     }
+    
 
 
 # Email verification developer helpers have been removed
@@ -567,12 +747,18 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
     # Revoke all refresh tokens for this user
     crud.revoke_user_refresh_tokens(db, int(user_id))
     clear_session_cookies(response)
+    # Publish presence offline for other instances via Redis
+    try:
+        if _REDIS is not None:
+            await _REDIS.publish("presence", json.dumps({"user_id": int(user_id), "is_online": False}))
+    except Exception:
+        pass
 
     return {"message": "Logged out"}
 
 
 @app.post("/presence/offline")
-def presence_offline(request: Request, db: Session = Depends(get_db)):
+async def presence_offline(request: Request, db: Session = Depends(get_db)):
     _require_csrf(request)
     token = request.cookies.get("access_token")
     if not token:
@@ -587,4 +773,10 @@ def presence_offline(request: Request, db: Session = Depends(get_db)):
         auth.is_online = False
         auth.last_login = datetime.utcnow()
         db.commit()
+    # Publish presence offline
+    try:
+        if _REDIS is not None:
+            await _REDIS.publish("presence", json.dumps({"user_id": user_id, "is_online": False}))
+    except Exception:
+        pass
     return {"ok": True}

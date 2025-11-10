@@ -12,6 +12,10 @@ from database import SessionLocal
 import models, crud
 import time
 from collections import deque
+try:
+    from redis.asyncio import from_url as redis_from_url
+except Exception:
+    redis_from_url = None
 
 router = APIRouter()
 
@@ -25,6 +29,7 @@ class Conn:
         self.last_seen = datetime.utcnow()
 
 conns: dict[int, Conn] = {}
+_REDIS = None
 
 # Simple per-user rate limiter for WS RPCs
 _WS_RL: dict[int, deque] = {}
@@ -135,6 +140,13 @@ async def ws_endpoint(ws: WebSocket):
     this_conn = Conn(ws, user_id)
     conns[user_id] = this_conn
     await mark_online(user_id, True)
+    # broadcast + publish presence online
+    try:
+        await _broadcast_presence(user_id, True)
+        if _REDIS is not None:
+            await _REDIS.publish("presence", json.dumps({"user_id": user_id, "is_online": True}))
+    except Exception:
+        pass
 
     # Catch-up: deliver unread notifications that were created while user was offline
     try:
@@ -222,6 +234,27 @@ async def ws_endpoint(ws: WebSocket):
                             result = {"id": note.id, "created_at": note.created_at.isoformat() if note.created_at else None}
                         finally:
                             db.close()
+                        # Push WS event to receiver immediately (no DB NOTIFY required)
+                        try:
+                            payload = {
+                                "id": result.get("id"),
+                                "sender_id": user_id,
+                                "receiver_id": receiver_id,
+                                "message_text": message_text,
+                                "created_at": result.get("created_at"),
+                            }
+                            msg = json.dumps({"type": "event", "event": "notification.new", "payload": payload})
+                            c = conns.get(receiver_id)
+                            if c is not None:
+                                await c.ws.send_text(msg)
+                            # publish to Redis for other instances
+                            if _REDIS is not None:
+                                try:
+                                    await _REDIS.publish("notifications", json.dumps(payload))
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                         await ws.send_text(json.dumps({"type": "rpc_result", "id": mid, "result": result}))
                     elif mtype == "notifications.ack":
                         payload_in = m.get("payload", {}) or {}
@@ -259,16 +292,18 @@ async def ws_endpoint(ws: WebSocket):
                             auth_map = {
                                 a.user_id: a for a in db.query(models.Auth).filter(models.Auth.user_id.in_(user_ids)).all()
                             } if user_ids else {}
+                            # Pull profile genders to support filtering on frontend
+                            prof_map = {
+                                p.user_id: p for p in db.query(models.UserProfile).filter(models.UserProfile.user_id.in_(user_ids)).all()
+                            } if user_ids else {}
                             items = []
                             for u in users:
                                 a = auth_map.get(u.id)
                                 items.append({
                                     "id": u.id,
                                     "name": u.name,
-                                    "age": u.age,
-                                    "gender": u.gender,
+                                    "gender": (prof_map.get(u.id).gender if prof_map.get(u.id) else None),
                                     "created_at": u.created_at.isoformat() if u.created_at else None,
-                                    "is_verified": u.is_verified,
                                     "role": a.role if a else None,
                                     "is_online": a.is_online if a else False,
                                     "last_login": a.last_login.isoformat() if (a and a.last_login) else None,
@@ -294,14 +329,14 @@ async def ws_endpoint(ws: WebSocket):
                                 await ws.send_text(json.dumps({"type": "rpc_error", "id": mid, "error": {"message": "User not found", "code": 404}}))
                                 continue
                             a = db.query(models.Auth).filter(models.Auth.user_id == target_id).first()
+                            prof = db.query(models.UserProfile).filter(models.UserProfile.user_id == target_id).first()
                             profile = {
                                 "id": u.id,
                                 "name": u.name,
-                                "age": u.age,
-                                "gender": u.gender,
-                                "email": u.email,
                                 "created_at": u.created_at.isoformat() if u.created_at else None,
-                                "is_verified": u.is_verified,
+                                "gender": (prof.gender if prof else None),
+                                "age": (prof.age if prof else None),
+                                "avatar_url": (prof.avatar_url if prof else None),
                                 "role": a.role if a else None,
                                 "is_online": a.is_online if a else False,
                                 "last_login": a.last_login.isoformat() if (a and a.last_login) else None,
@@ -313,13 +348,9 @@ async def ws_endpoint(ws: WebSocket):
                         db = SessionLocal()
                         try:
                             total_users = db.query(models.User).count()
-                            female_users = db.query(models.User).filter(models.User.gender == 'женский').count()
-                            male_users = db.query(models.User).filter(models.User.gender == 'мужской').count()
                             online_users = db.query(models.Auth).filter(models.Auth.is_online == True).count()
                             stats = {
                                 "total_users": total_users,
-                                "female_users": female_users,
-                                "male_users": male_users,
                                 "online_users": online_users,
                             }
                         finally:
@@ -333,6 +364,12 @@ async def ws_endpoint(ws: WebSocket):
         if conns.get(user_id) is this_conn:
             conns.pop(user_id, None)
             await mark_online(user_id, False)
+            try:
+                await _broadcast_presence(user_id, False)
+                if _REDIS is not None:
+                    await _REDIS.publish("presence", json.dumps({"user_id": user_id, "is_online": False}))
+            except Exception:
+                pass
 
 
 async def watchdog():
@@ -352,6 +389,60 @@ async def watchdog():
 @router.on_event("startup")
 async def start_watchdog():
     asyncio.create_task(watchdog())
+    # Init Redis for presence pub/sub
+    global _REDIS
+    url = os.getenv("REDIS_URL") or getattr(settings, 'REDIS_URL', None)
+    if url and redis_from_url is not None:
+        try:
+            _REDIS = redis_from_url(url, encoding="utf-8", decode_responses=True)
+            await _REDIS.ping()
+            async def _sub_presence():
+                try:
+                    pubsub = _REDIS.pubsub()
+                    await pubsub.subscribe("presence")
+                    async for m in pubsub.listen():
+                        if not m or m.get('type') != 'message':
+                            continue
+                        try:
+                            data = json.loads(m.get('data') or '{}')
+                            uid = int(data.get('user_id'))
+                            flag = bool(data.get('is_online'))
+                            await _broadcast_presence(uid, flag)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            asyncio.create_task(_sub_presence())
+            async def _sub_notifications():
+                try:
+                    pubsub = _REDIS.pubsub()
+                    await pubsub.subscribe("notifications")
+                    async for m in pubsub.listen():
+                        if not m or m.get('type') != 'message':
+                            continue
+                        try:
+                            data = json.loads(m.get('data') or '{}')
+                            rid = int(data.get('receiver_id') or 0)
+                            msg = json.dumps({"type": "event", "event": "notification.new", "payload": data})
+                            c = conns.get(rid)
+                            if c is not None:
+                                await c.ws.send_text(msg)
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+            asyncio.create_task(_sub_notifications())
+        except Exception:
+            _REDIS = None
+
+async def _broadcast_presence(user_id: int, is_online: bool):
+    payload = {"user_id": user_id, "is_online": bool(is_online)}
+    msg = json.dumps({"type": "event", "event": "presence.update", "payload": payload})
+    for c in list(conns.values()):
+        try:
+            await c.ws.send_text(msg)
+        except Exception:
+            pass
 
 
 def _listen_notifications(loop: asyncio.AbstractEventLoop):

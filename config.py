@@ -6,9 +6,7 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     SECRET_KEY: str
-    TELEGRAM_BOT_TOKEN: str | None = None
-    TELEGRAM_BOT_USERNAME: str | None = None
-    TELEGRAM_CHAT_ID: str | None = None
+    REDIS_URL: str | None = None
 
 
 settings = Settings()

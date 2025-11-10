@@ -7,6 +7,10 @@ import time
 import asyncio
 
 from config import settings
+try:
+    from redis.asyncio import from_url as redis_from_url
+except Exception:
+    redis_from_url = None
 from database import SessionLocal
 import models
 import crud
@@ -69,6 +73,26 @@ def publish_notification_event(user_id: int) -> None:
             q.put_nowait({"t": time.time()})
         except asyncio.QueueFull:
             pass
+    # Also publish to Redis channel for WS fanout across instances
+    try:
+        url = getattr(settings, 'REDIS_URL', None)
+        if url and redis_from_url is not None:
+            async def _pub():
+                try:
+                    r = redis_from_url(url, encoding="utf-8", decode_responses=True)
+                    await r.publish("notifications", json.dumps({"receiver_id": user_id}))
+                except Exception:
+                    pass
+            try:
+                loop = asyncio.get_event_loop()
+                if loop and loop.is_running():
+                    loop.create_task(_pub())
+                else:
+                    asyncio.run(_pub())
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 @router.get("/online-status")

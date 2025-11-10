@@ -89,6 +89,12 @@ def revoke_user_refresh_tokens(db: Session, user_id: int):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    try:
+        return pwd_context.verify(plain_password, password_hash)
+    except Exception:
+        return False
+
 def get_user_by_id(db: Session, user_id: int):
     return db.query(models.User).filter(models.User.id == user_id).first()
 
@@ -96,69 +102,14 @@ def get_user_by_name(db: Session, name: str):
     """Находит пользователя по имени (регистрозависимо)"""
     return db.query(models.User).filter(models.User.name == name).first()
 
+# Email no longer used
 def get_user_by_email(db: Session, email: str):
-    """Находит пользователя по email"""
-    return db.query(models.User).filter(models.User.email == email).first()
+    return None
 
 def get_auth_by_user_id(db: Session, user_id: int):
     return db.query(models.Auth).filter(models.Auth.user_id == user_id).first()
 
-# Telegram upsert: find or create a user by Telegram data
-def upsert_user_from_telegram(db: Session, tg: dict):
-    tg_id = int(tg.get('id'))
-    username = (tg.get('username') or tg.get('first_name') or f'user_{tg_id}')
-
-    # Prefer lookup by telegram_id now that email is optional
-    user = db.query(models.User).filter(getattr(models.User, 'telegram_id') == tg_id).first()
-    if not user:
-        user = models.User(
-            name=username,
-            age=None,
-            email=None,
-            gender=None,
-            is_verified=True,
-        )
-        # Set telegram fields if present (columns added on startup)
-        try:
-            setattr(user, 'telegram_id', tg_id)
-            if tg.get('username'):
-                setattr(user, 'telegram_username', tg.get('username'))
-        except Exception:
-            pass
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-
-        db_auth = models.Auth(
-            user_id=user.id,
-            password_hash=get_password_hash(secrets.token_urlsafe(24)),
-            role="user",
-        )
-        db.add(db_auth)
-        db.commit()
-    else:
-        # Update telegram fields if missing
-        changed = False
-        try:
-            if not getattr(user, 'telegram_id', None):
-                setattr(user, 'telegram_id', tg_id)
-                changed = True
-            if tg.get('username') and getattr(user, 'telegram_username', None) != tg.get('username'):
-                setattr(user, 'telegram_username', tg.get('username'))
-                changed = True
-        except Exception:
-            pass
-        if changed:
-            db.commit()
-
-    auth = get_auth_by_user_id(db, user.id)
-    if auth:
-        auth.last_login = datetime.utcnow()
-        auth.is_online = True
-        db.commit()
-
-    return {"user": user, "auth": auth}
-# Telegram upsert removed
+## Telegram upsert removed
 
 # Username/password authentication removed
 
@@ -208,49 +159,21 @@ def get_users(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.User).offset(skip).limit(limit).all()
 
 def create_user(db: Session, user: schemas.UserCreate):
-    """Создание пользователя (простая версия без верификации)"""
-    # Дополнительная проверка email на стороне сервера
-    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    if not re.match(email_pattern, user.email):
-        raise ValueError("Некорректный формат email")
-    
-    # Проверка тестовых доменов (разрешаем yandex.ru и mail.ru)
-    forbidden_domains = ['example.com', 'test.com', 'localhost']
-    domain = user.email.split('@')[-1].lower()
-    if domain in forbidden_domains:
-        raise ValueError("Использование тестового домена запрещено")
-    
-    # Проверяем существующего пользователя
-    existing_user = db.query(models.User).filter(
-        (models.User.name == user.name) | 
-        (models.User.email == user.email.lower())
-    ).first()
-    
+    """Создание пользователя с минимальными полями (name + пароль)."""
+    existing_user = db.query(models.User).filter(models.User.name == user.name).first()
     if existing_user:
-        raise ValueError("Пользователь с такими данными уже существует")
-    
-    # Создаем пользователя
-    db_user = models.User(
-        name=user.name, 
-        age=user.age, 
-        email=user.email.lower(),
-        gender=user.gender
-    )
+        raise ValueError("Пользователь с таким именем уже существует")
+
+    db_user = models.User(name=user.name)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
-    
-    # Создаем запись аутентификации (парольная аутентификация отключена; храним случайный хеш)
-    password_hash = get_password_hash(secrets.token_urlsafe(24))
 
-    db_auth = models.Auth(
-        user_id=db_user.id,
-        password_hash=password_hash,
-        role="user"
-    )
+    password_hash = get_password_hash(user.password)
+    db_auth = models.Auth(user_id=db_user.id, password_hash=password_hash, role="user")
     db.add(db_auth)
     db.commit()
-    
+
     return db_user
 
 # Email verification flow removed: no code generation / mail sending
