@@ -669,9 +669,13 @@ async def login(payload: LoginRequest, response: Response, request: Request, db:
         "refresh_token": refresh_token,
     }
 
-
 @app.post("/register", response_model=Token)
-async def register(payload: UserCreate, response: Response, request: Request, db: Session = Depends(get_db)):
+async def register(
+    payload: UserCreate,
+    response: Response,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     """Register a new user with unique name and password; start a session via cookies."""
     name = (payload.name or "").strip()
     password = payload.password or ""
@@ -709,6 +713,7 @@ async def register(payload: UserCreate, response: Response, request: Request, db
         "refresh_token": refresh_token,
     }
     
+
 
 
 # Email verification developer helpers have been removed
