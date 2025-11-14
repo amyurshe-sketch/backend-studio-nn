@@ -29,6 +29,7 @@ import asyncio
 import os
 from typing import Deque, Dict
 from logger import logger
+import httpx
 try:
     from redis.asyncio import from_url as redis_from_url
 except Exception:
@@ -57,6 +58,8 @@ _DEFAULT_ORIGINS = [
 ]
 _EXTRA = [o.strip() for o in os.getenv("ALLOW_ORIGINS", "").split(",") if o.strip()]
 FRONTEND_ORIGINS = _DEFAULT_ORIGINS + _EXTRA
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,6 +91,29 @@ app.add_middleware(SecurityHeadersMiddleware)
 from starlette.middleware.gzip import GZipMiddleware
 # GZip large responses (e.g., RSS lists)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+async def _notify_new_user_registration(user_name: str) -> None:
+    """Send Telegram notification about a successful user registration."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    message = (
+        "🎉 Новая регистрация на сайте\n\n"
+        f"👤 Имя: {user_name or 'Не указано'}\n"
+        f"⏰ Время: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                },
+            )
+    except Exception as exc:
+        logger.warning(f"Failed to send Telegram registration notification: {exc}")
 
 # Suppress noisy access logs for health checks only
 class _HealthzAccessFilter(logging.Filter):
@@ -704,6 +730,10 @@ async def register(
     access_token = crud.create_access_token({"user_id": user.id})
     refresh_token = crud.create_refresh_token(db, user.id)
     set_session_cookies(response, access_token, refresh_token)
+    try:
+        await _notify_new_user_registration(user.name or "")
+    except Exception as exc:
+        logger.warning(f"Unexpected error while scheduling Telegram notification: {exc}")
     return {
         "access_token": access_token,
         "token_type": "bearer",
