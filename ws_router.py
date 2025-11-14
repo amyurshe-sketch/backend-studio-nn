@@ -19,8 +19,8 @@ except Exception:
 
 router = APIRouter()
 
-PING_INTERVAL = 60
-PONG_TIMEOUT = 90
+PING_INTERVAL = 180
+PONG_TIMEOUT = 600
 
 class Conn:
     def __init__(self, ws: WebSocket, user_id: int):
