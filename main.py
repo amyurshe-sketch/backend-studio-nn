@@ -56,6 +56,8 @@ _DEFAULT_ORIGINS = [
     "http://localhost:5173",
     "https://studio-nn.vercel.app",
     "https://nn-studio.onrender.com",
+    "https://studio-nn.online",
+    "https://www.studio-nn.online",
 ]
 _EXTRA = [o.strip() for o in os.getenv("ALLOW_ORIGINS", "").split(",") if o.strip()]
 FRONTEND_ORIGINS = _DEFAULT_ORIGINS + _EXTRA
