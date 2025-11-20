@@ -57,7 +57,12 @@ async def auth_ws(ws: WebSocket) -> int:
       origin = None
     allowed = set([o.strip() for o in (os.getenv("ALLOW_ORIGINS", "").split(",")) if o.strip()])
     if not allowed:
-        allowed = {"http://localhost:3000", "https://studio-nn.vercel.app"}
+        allowed = {
+            "http://localhost:3000",
+            "https://studio-nn.vercel.app",
+            "https://studio-nn.online",
+            "https://www.studio-nn.online",
+        }
     if origin and origin not in allowed:
         try:
             await ws.close(code=4403, reason="forbidden origin")
