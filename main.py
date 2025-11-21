@@ -9,6 +9,8 @@ from schemas import (
     UserCreate,
     Token,
     LoginRequest,
+    AIChatRequest,
+    AIChatResponse,
 )
 import models
 import crud
@@ -63,6 +65,8 @@ _EXTRA = [o.strip() for o in os.getenv("ALLOW_ORIGINS", "").split(",") if o.stri
 FRONTEND_ORIGINS = _DEFAULT_ORIGINS + _EXTRA
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+AI_AGENT_URL = settings.AI_AGENT_URL or "http://localhost:8001/api/chat"
+AI_AGENT_SECRET = settings.AI_AGENT_SECRET
 
 app.add_middleware(
     CORSMiddleware,
@@ -449,6 +453,25 @@ async def _enforce_limits(pairs: list[tuple[str, int, int]], reason: str):
 @app.get("/")
 def home():
     return {"status": "Studio NN API работает"}
+
+
+@app.post("/api/ai-chat", response_model=AIChatResponse)
+async def ai_chat_proxy(payload: AIChatRequest):
+    if not AI_AGENT_URL:
+        raise HTTPException(status_code=503, detail="AI agent is not configured")
+    headers = {}
+    if AI_AGENT_SECRET:
+        headers["X-Agent-Secret"] = AI_AGENT_SECRET
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(AI_AGENT_URL, json=payload.model_dump(), headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            return AIChatResponse(**data)
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
 
 @app.get("/self-test")

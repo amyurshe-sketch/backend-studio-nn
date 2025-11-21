@@ -1,7 +1,28 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import datetime
 import re
+
+# --- AI chat schemas ---
+Role = Literal["system", "user", "assistant"]
+
+
+class AIChatMessage(BaseModel):
+    role: Role = "user"
+    content: str = Field(..., min_length=1)
+
+
+class AIChatRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    chat_id: Optional[str] = None
+    history: List[AIChatMessage] = Field(default_factory=list)
+    channel: str = Field(default="web")
+
+
+class AIChatResponse(BaseModel):
+    answer: str
+    chat_id: str
+    channel: str = "web"
 
 class UserBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=50, description="Имя пользователя")
