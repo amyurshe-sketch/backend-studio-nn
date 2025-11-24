@@ -665,6 +665,7 @@ def _require_csrf(request: Request):
 def clear_session_cookies(response: Response):
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
+    response.delete_cookie("csrf_token", path="/")
 
 @app.post("/login", response_model=Token)
 async def login(payload: LoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
@@ -809,40 +810,36 @@ async def logout(request: Request, response: Response, db: Session = Depends(get
 
     Accept either Authorization: Bearer or HttpOnly cookie.
     """
-    _require_csrf(request)
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     token = None
     if auth_header and auth_header.lower().startswith("bearer "):
         token = auth_header.split(" ", 1)[1].strip()
     else:
         token = request.cookies.get("access_token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing token")
+    user_id = None
+    if token:
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+            user_id = payload.get("user_id")
+        except JWTError:
+            user_id = None
 
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        user_id = payload.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token payload")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    if user_id:
+        # Set user offline if auth record exists
+        auth = crud.get_auth_by_user_id(db, int(user_id))
+        if auth:
+            auth.is_online = False
+            db.commit()
+        # Revoke all refresh tokens for this user
+        crud.revoke_user_refresh_tokens(db, int(user_id))
+        # Publish presence offline for other instances via Redis
+        try:
+            if _REDIS is not None:
+                await _REDIS.publish("presence", json.dumps({"user_id": int(user_id), "is_online": False}))
+        except Exception:
+            pass
 
-    # Set user offline if auth record exists
-    auth = crud.get_auth_by_user_id(db, int(user_id))
-    if auth:
-        auth.is_online = False
-        db.commit()
-
-    # Revoke all refresh tokens for this user
-    crud.revoke_user_refresh_tokens(db, int(user_id))
     clear_session_cookies(response)
-    # Publish presence offline for other instances via Redis
-    try:
-        if _REDIS is not None:
-            await _REDIS.publish("presence", json.dumps({"user_id": int(user_id), "is_online": False}))
-    except Exception:
-        pass
-
     return {"message": "Logged out"}
 
 
