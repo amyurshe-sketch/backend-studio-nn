@@ -1,3 +1,4 @@
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,9 +7,9 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
     SECRET_KEY: str
-    REDIS_URL: str | None = None
-    AI_AGENT_URL: str | None = None
-    AI_AGENT_SECRET: str | None = None
+    REDIS_URL: Optional[str] = None
+    AI_AGENT_URL: Optional[str] = None
+    AI_AGENT_SECRET: Optional[str] = None
 
 
 settings = Settings()
