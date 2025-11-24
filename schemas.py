@@ -17,6 +17,8 @@ class AIChatRequest(BaseModel):
     chat_id: Optional[str] = None
     history: List[AIChatMessage] = Field(default_factory=list)
     channel: str = Field(default="web")
+    user_id: Optional[int] = None
+    user_profile: Optional[dict] = None
 
 
 class AIChatResponse(BaseModel):

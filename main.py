@@ -456,15 +456,43 @@ def home():
 
 
 @app.post("/api/ai-chat", response_model=AIChatResponse)
-async def ai_chat_proxy(payload: AIChatRequest):
+async def ai_chat_proxy(payload: AIChatRequest, request: Request, db: Session = Depends(get_db)):
     if not AI_AGENT_URL:
         raise HTTPException(status_code=503, detail="AI agent is not configured")
     headers = {}
     if AI_AGENT_SECRET:
         headers["X-Agent-Secret"] = AI_AGENT_SECRET
+    user_id = payload.user_id
+    user_profile = payload.user_profile
+    # Попробуем извлечь user_id из access_token cookie, если не передан
+    if user_id is None:
+        token = request.cookies.get("access_token")
+        if token:
+            try:
+                token_data = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+                uid = token_data.get("user_id")
+                if uid is not None:
+                    user_id = int(uid)
+            except JWTError:
+                user_id = None
+    if user_id is not None and user_profile is None:
+        try:
+            user = crud.get_user_by_id(db, user_id)
+            profile = db.query(models.UserProfile).filter(models.UserProfile.user_id == user_id).first()
+            user_profile = {
+                "name": getattr(user, "name", None),
+                "age": getattr(profile, "age", None),
+                "gender": getattr(profile, "gender", None),
+                "about": getattr(profile, "about", None),
+            }
+        except Exception:
+            user_profile = None
+    payload_for_agent = payload.model_dump()
+    payload_for_agent["user_id"] = user_id
+    payload_for_agent["user_profile"] = user_profile
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(AI_AGENT_URL, json=payload.model_dump(), headers=headers)
+            resp = await client.post(AI_AGENT_URL, json=payload_for_agent, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             return AIChatResponse(**data)
