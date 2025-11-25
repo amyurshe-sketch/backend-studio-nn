@@ -29,7 +29,7 @@ from collections import deque
 import time
 import asyncio
 import os
-from typing import Deque, Dict
+from typing import Deque, Dict, Optional
 from logger import logger
 import httpx
 try:
@@ -608,7 +608,7 @@ def statistics(db: Session = Depends(get_db)):
 
 
 
-def set_session_cookies(response: Response, access_token: str, refresh_token: str | None = None):
+def set_session_cookies(response: Response, access_token: str, refresh_token: Optional[str] = None):
     """Set HttpOnly cookies for session.
 
     In production (separate frontend/backend domains, HTTPS), set SameSite=None; Secure=True.

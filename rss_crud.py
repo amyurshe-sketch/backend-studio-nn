@@ -2,6 +2,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 import rss_models as models
 import rss_schemas as schemas
 
@@ -108,7 +109,7 @@ def list_rss_items_for_sources(db: Session, sources: list, limit: int = 50):
 
 
 # --- Fetch meta helpers ---
-def get_fetch_meta(db: Session, source_key: str) -> models.RssFetchMeta | None:
+def get_fetch_meta(db: Session, source_key: str) -> Optional[models.RssFetchMeta]:
     return db.execute(
         select(models.RssFetchMeta).where(models.RssFetchMeta.source_key == source_key)
     ).scalar_one_or_none()

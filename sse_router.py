@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 from jose import jwt, JWTError
-from typing import Generator, Dict, Set
+from typing import Generator, Dict, Set, Optional
 import json
 import time
 import asyncio
@@ -33,7 +33,7 @@ def _decode_token(token: str) -> int:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-def _sse_format(event: str | None, data: dict | str) -> str:
+def _sse_format(event: Optional[str], data: dict | str) -> str:
     payload = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
     lines = []
     if event:
