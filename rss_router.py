@@ -11,11 +11,12 @@ import rss_models as models
 import os
 import time
 from collections import deque
+from typing import Dict
 
 router = APIRouter(prefix="/rss", tags=["rss"])
 
 # Simple per-process IP rate limit for RSS endpoints
-_RL: dict[str, deque] = {}
+_RL: Dict[str, deque] = {}
 
 def _allow(key: str, limit: int, window_sec: int) -> bool:
     now = time.time()
