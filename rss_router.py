@@ -11,7 +11,7 @@ import rss_models as models
 import os
 import time
 from collections import deque
-from typing import Dict
+from typing import Dict, List
 
 router = APIRouter(prefix="/rss", tags=["rss"])
 
@@ -96,7 +96,7 @@ def _fetch_and_store_rss(db: Session, source_key: str):
     crud.touch_fetch_meta(db, source_key)
 
 
-def _ensure_fresh(db: Session, sources: list[str], min_age_hours: int = 24):
+def _ensure_fresh(db: Session, sources: List[str], min_age_hours: int = 24):
     """Refresh selected sources once per TTL, on-demand (no timers)."""
     for s in sources:
         try:
