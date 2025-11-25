@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session
+from typing import List
 from jose import jwt, JWTError
 
 from database import get_db
@@ -51,7 +52,7 @@ def create_notification(
     return notif
 
 
-@router.get("/notifications", response_model=list[schemas.Notification])
+@router.get("/notifications", response_model=List[schemas.Notification])
 def list_notifications(
     request: Request,
     unread_only: bool = Query(False),
@@ -62,7 +63,7 @@ def list_notifications(
     return items
 
 
-@router.get("/notifications/sent", response_model=list[schemas.Notification])
+@router.get("/notifications/sent", response_model=List[schemas.Notification])
 def list_sent_notifications(request: Request, db: Session = Depends(get_db)):
     """List notifications the current user has sent (outbox)."""
     user_id = _current_user_id_from_bearer(request)
@@ -75,7 +76,7 @@ def list_sent_notifications(request: Request, db: Session = Depends(get_db)):
     return items
 
 
-@router.get("/notifications/thread/{other_user_id}", response_model=list[schemas.Notification])
+@router.get("/notifications/thread/{other_user_id}", response_model=List[schemas.Notification])
 def conversation_with_user(
     other_user_id: int,
     request: Request,
