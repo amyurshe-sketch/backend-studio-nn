@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import List, Tuple
 from sqlalchemy.orm import Session
 from datetime import datetime
 from collections import deque
@@ -65,7 +66,7 @@ def _allow_rate(key: str, limit: int, window_sec: int) -> bool:
     dq.append(now)
     return True
 
-async def _r_limit(keys: list[tuple[str, int, int]]):
+async def _r_limit(keys: List[Tuple[str, int, int]]):
     if _REDIS is None:
         # fallback: validate with in-memory limiter
         for k, limit, window in keys:

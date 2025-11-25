@@ -29,7 +29,7 @@ from collections import deque
 import time
 import asyncio
 import os
-from typing import Deque, Dict, Optional
+from typing import Deque, Dict, Optional, List, Tuple
 from logger import logger
 import httpx
 try:
@@ -301,7 +301,7 @@ def _allow_rate(key: str, limit: int, window_sec: int) -> bool:
     dq.append(now)
     return True
 
-def _limit_sync(pairs: list[tuple[str, int, int]], reason: str):
+def _limit_sync(pairs: List[Tuple[str, int, int]], reason: str):
     """Synchronous in-process limiter (per-process). Uses in-memory deque."""
     for key, limit, window in pairs:
         if not _allow_rate(key, limit, window):
@@ -362,7 +362,7 @@ async def _r_incr_with_ttl(key: str, window_sec: int) -> int:
         await _REDIS.expire(key, window_sec)
     return int(val)
 
-async def _r_limit(keys: list[tuple[str, int, int]], reason: str):
+async def _r_limit(keys: List[Tuple[str, int, int]], reason: str):
     if _REDIS is None:
         raise RuntimeError("Redis not available")
     for key, limit, window in keys:
@@ -424,7 +424,7 @@ async def _r_clear_fails(key: str):
     except Exception:
         pass
 
-async def _enforce_limits(pairs: list[tuple[str, int, int]], reason: str):
+async def _enforce_limits(pairs: List[Tuple[str, int, int]], reason: str):
     for key, limit, window in pairs:
         allowed = True
         if _REDIS is not None:

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from typing import Dict
 import os
 from jose import jwt
 from jose.exceptions import JWTError, ExpiredSignatureError
@@ -28,11 +29,11 @@ class Conn:
         self.user_id = user_id
         self.last_seen = datetime.utcnow()
 
-conns: dict[int, Conn] = {}
+conns: Dict[int, Conn] = {}
 _REDIS = None
 
 # Simple per-user rate limiter for WS RPCs
-_WS_RL: dict[int, deque] = {}
+_WS_RL: Dict[int, deque] = {}
 
 def _ws_allow(uid: int, limit: int, window_sec: int) -> bool:
     now = time.time()
