@@ -156,7 +156,7 @@ def get_rss_sources():
         }
     }
 
-@router.get("/latest/{source}", response_model=list[schemas.RssItemRead], summary="Последние новости из конкретного источника")
+@router.get("/latest/{source}", response_model=List[schemas.RssItemRead], summary="Последние новости из конкретного источника")
 def rss_latest_by_source(
     source: str,
     limit: int = Query(50, ge=1, le=200), 
@@ -170,13 +170,13 @@ def rss_latest_by_source(
     _ensure_fresh(db, [source], min_age_hours=24)
     return crud.list_rss_items(db, model_class, limit=limit)
 
-@router.get("/latest", response_model=list[schemas.RssItemRead], summary="Последние новости из всех источников")
+@router.get("/latest", response_model=List[schemas.RssItemRead], summary="Последние новости из всех источников")
 def rss_latest(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db), _: None = Depends(rss_rate_limit)):
     _ensure_fresh(db, list(RSS_SOURCES.keys()), min_age_hours=24)
     return crud.list_all_rss_items(db, limit=limit)
 
 # Эндпоинты для фронтенда
-@router.get("/news/cnews", response_model=list[schemas.RssItemRead], summary="Новости CNews для фронтенда")
+@router.get("/news/cnews", response_model=List[schemas.RssItemRead], summary="Новости CNews для фронтенда")
 def get_cnews_for_frontend(
     limit: int = Query(5, ge=1, le=25, description="Количество новостей CNews (1-25)"),
     db: Session = Depends(get_db),
@@ -186,7 +186,7 @@ def get_cnews_for_frontend(
     _ensure_fresh(db, ["cnews"], min_age_hours=24)
     return crud.list_rss_items(db, models.CNewsRssItem, limit=limit)
 
-@router.get("/news/habr", response_model=list[schemas.RssItemRead], summary="Новости Habr для фронтенда")
+@router.get("/news/habr", response_model=List[schemas.RssItemRead], summary="Новости Habr для фронтенда")
 def get_habr_for_frontend(
     limit: int = Query(5, ge=1, le=25, description="Количество новостей Habr (1-25)"),
     db: Session = Depends(get_db),
@@ -196,7 +196,7 @@ def get_habr_for_frontend(
     _ensure_fresh(db, ["habr"], min_age_hours=24)
     return crud.list_rss_items(db, models.HabrRssItem, limit=limit)
 
-@router.get("/news", response_model=list[schemas.RssItemRead], summary="Получить последние новости для фронтенда")
+@router.get("/news", response_model=List[schemas.RssItemRead], summary="Получить последние новости для фронтенда")
 def get_news_for_frontend(
     limit: str = Query("10", description="Количество новостей (1-50) или 'all' для всех"),
     db: Session = Depends(get_db),
