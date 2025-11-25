@@ -78,7 +78,10 @@ def list_users_with_info(
     }
 
 
-@router.get("/users", response_model=list[UserInfo])
+from typing import List
+
+
+@router.get("/users", response_model=List[UserInfo])
 def list_all_users(db: Session = Depends(get_db)):
     users = (
         db.query(models.User)
