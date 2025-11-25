@@ -178,10 +178,10 @@ class LoginRequest(BaseModel):
 
 # User profile schemas
 class UserProfileUpdate(BaseModel):
-    gender: str | None = None
-    age: int | None = Field(default=None, ge=1, le=120)
-    about: str | None = Field(default=None, max_length=100)
-    avatar_url: str | None = None
+    gender: Optional[str] = None
+    age: Optional[int] = Field(default=None, ge=1, le=120)
+    about: Optional[str] = Field(default=None, max_length=100)
+    avatar_url: Optional[str] = None
 
     @field_validator('gender')
     @classmethod
@@ -201,10 +201,10 @@ class UserProfileUpdate(BaseModel):
 
 class UserProfileOut(BaseModel):
     user_id: int
-    gender: str | None = None
-    age: int | None = None
-    about: str | None = None
-    avatar_url: str | None = None
+    gender: Optional[str] = None
+    age: Optional[int] = None
+    about: Optional[str] = None
+    avatar_url: Optional[str] = None
     
     class Config:
         from_attributes = True
