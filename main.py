@@ -57,10 +57,9 @@ app = FastAPI(
 _DEFAULT_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:5173",
-    "https://studio-nn.vercel.app",
-    "https://nn-studio.onrender.com",
     "https://studio-nn.online",
     "https://www.studio-nn.online",
+    "https://api.studio-nn.online",
 ]
 _EXTRA = [o.strip() for o in os.getenv("ALLOW_ORIGINS", "").split(",") if o.strip()]
 FRONTEND_ORIGINS = _DEFAULT_ORIGINS + _EXTRA
@@ -528,6 +527,7 @@ async def ai_chat_proxy(payload: AIChatRequest, request: Request, db: Session = 
 
 @app.get("/self-test")
 def self_test(request: Request, db: Session = Depends(get_db)):
+    _require_internal(request)
     """Lightweight end-to-end test: API, DB, Redis, auth cookie."""
     api_ok = True
     db_ok = False
@@ -559,11 +559,13 @@ def healthz():
 
 # Protected OpenAPI JSON and Swagger UI
 @app.get("/openapi.json", include_in_schema=False)
-def openapi_json():
+def openapi_json(request: Request):
+    _require_internal(request)
     return JSONResponse(app.openapi())
 
 @app.get("/docs", include_in_schema=False)
-def docs():
+def docs(request: Request):
+    _require_internal(request)
     return get_swagger_ui_html(openapi_url="/openapi.json", title="API docs")
 
 
@@ -690,6 +692,13 @@ def clear_session_cookies(response: Response):
     response.delete_cookie("access_token", path="/")
     response.delete_cookie("refresh_token", path="/")
     response.delete_cookie("csrf_token", path="/")
+
+
+def _require_internal(request: Request):
+    """Allow access only from localhost/internal network."""
+    client_host = request.client.host if request and request.client else ""
+    if client_host not in {"127.0.0.1", "::1"}:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 @app.post("/login", response_model=Token)
 async def login(payload: LoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
