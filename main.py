@@ -798,13 +798,13 @@ async def register(
     # Rate limit registrations per IP
     if _REDIS is not None:
         await _r_limit([
-            (f"rl:register:ip:{ip}", 3, 600),
-            (f"rl:register:ip-hour:{ip}", 10, 3600),
+            (f"rl:register:ip:{ip}", 2, 1800),   # не более 2 за 30 минут
+            (f"rl:register:ip-hour:{ip}", 4, 3600),
         ], reason="register")
     else:
         _limit_sync([
-            (f"rl:register:ip:{ip}", 3, 600),
-            (f"rl:register:ip-hour:{ip}", 10, 3600),
+            (f"rl:register:ip:{ip}", 2, 1800),
+            (f"rl:register:ip-hour:{ip}", 4, 3600),
         ], reason="register")
     if not name or not password:
         raise HTTPException(status_code=400, detail="Name and password required")
