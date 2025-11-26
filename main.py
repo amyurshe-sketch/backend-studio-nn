@@ -11,6 +11,7 @@ from schemas import (
     LoginRequest,
     AIChatRequest,
     AIChatResponse,
+    TelegramMessageRequest,
 )
 import models
 import crud
@@ -121,6 +122,29 @@ async def _notify_new_user_registration(user_name: str) -> None:
             )
     except Exception as exc:
         logger.warning(f"Failed to send Telegram registration notification: {exc}")
+
+async def _send_telegram_message(text: str) -> None:
+    """Generic Telegram sender for contact form/stat messages."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        raise HTTPException(status_code=503, detail="Telegram is not configured")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                },
+            )
+            data = resp.json()
+            if resp.status_code != 200 or not data.get("ok", False):
+                raise RuntimeError(f"Telegram API error: {data}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning(f"Failed to send Telegram message: {exc}")
+        raise HTTPException(status_code=500, detail="Failed to deliver message")
 
 # Suppress noisy access logs for health checks only
 class _HealthzAccessFilter(logging.Filter):
@@ -797,8 +821,22 @@ async def register(
         "role": auth.role if auth else "user",
         "refresh_token": refresh_token,
     }
-    
 
+
+@app.post("/api/telegram")
+async def send_telegram_message(payload: TelegramMessageRequest):
+    """Contact form from stats page → Telegram."""
+    text = (
+        "📨 Новое сообщение со страницы статистики\n\n"
+        f"👤 Имя: {payload.name or '—'}\n"
+        f"📞 Контакт: {payload.contact or '—'}\n"
+        f"🌐 Язык: {payload.language or '—'}\n\n"
+        "💬 Сообщение:\n"
+        f"{payload.message}\n\n"
+        f"⏰ Время: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+    )
+    await _send_telegram_message(text)
+    return {"success": True, "message": "Сообщение отправлено"}
 
 
 # Email verification developer helpers have been removed
