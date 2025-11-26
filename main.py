@@ -554,7 +554,8 @@ def self_test(request: Request, db: Session = Depends(get_db)):
 
 # Public health endpoint (no auth) for Render health checks and wake-ups
 @app.get("/healthz", include_in_schema=False)
-def healthz():
+def healthz(request: Request):
+    _require_internal(request)
     return {"ok": True}
 
 # Protected OpenAPI JSON and Swagger UI
