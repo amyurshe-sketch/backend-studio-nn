@@ -26,6 +26,12 @@ class AIChatResponse(BaseModel):
     chat_id: str
     channel: str = "web"
 
+class AuthInfo(BaseModel):
+    user_id: int
+    name: str
+    role: str
+    message: Optional[str] = None
+
 class TelegramMessageRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     contact: str = Field(..., min_length=1, max_length=200)

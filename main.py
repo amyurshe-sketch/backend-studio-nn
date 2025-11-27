@@ -12,6 +12,7 @@ from schemas import (
     AIChatRequest,
     AIChatResponse,
     TelegramMessageRequest,
+    AuthInfo,
 )
 import models
 import crud
@@ -701,7 +702,7 @@ def _require_internal(request: Request):
     if client_host not in {"127.0.0.1", "::1"}:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-@app.post("/login", response_model=Token)
+@app.post("/login", response_model=AuthInfo)
 async def login(payload: LoginRequest, response: Response, request: Request, db: Session = Depends(get_db)):
     """Username/password login. Issues HttpOnly cookies and returns token info."""
     name = (payload.name or "").strip()
@@ -776,15 +777,13 @@ async def login(payload: LoginRequest, response: Response, request: Request, db:
     set_session_cookies(response, access_token, refresh_token)
 
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
         "user_id": user.id,
         "name": user.name or "",
         "role": auth.role or "user",
-        "refresh_token": refresh_token,
+        "message": "login successful",
     }
 
-@app.post("/register", response_model=Token)
+@app.post("/register", response_model=AuthInfo)
 async def register(
     payload: UserCreate,
     response: Response,
@@ -824,12 +823,10 @@ async def register(
     except Exception as exc:
         logger.warning(f"Unexpected error while scheduling Telegram notification: {exc}")
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
         "user_id": user.id,
         "name": user.name or "",
         "role": auth.role if auth else "user",
-        "refresh_token": refresh_token,
+        "message": "registration successful",
     }
 
 
